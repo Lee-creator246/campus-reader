@@ -1,0 +1,34 @@
+plugins {
+    id 'com.android.application' version '8.10.1' apply false
+    id 'com.android.library' version '8.10.1' apply false
+}
+
+subprojects {
+    plugins.withId('com.android.library') {
+        android { buildToolsVersion '36.0.0' }
+    }
+}
+
+ext.sangforSdkFile = file(providers.gradleProperty('sangforSdk').orElse('vendor/sangfor/SangforSDK.aar').get())
+def siteProperties = new Properties()
+def localSiteFile = file('campus.local.properties')
+def useTestDefaults = providers.gradleProperty('campusTestDefaults').orElse('false').get().toBoolean()
+if (localSiteFile.isFile() && !useTestDefaults) localSiteFile.withReader('UTF-8') { siteProperties.load(it) }
+def campusDomain = siteProperties.getProperty('campus.domain', 'campus.example.edu').trim().toLowerCase(Locale.ROOT)
+if (!(campusDomain ==~ /[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+/)) throw new GradleException('Invalid campus.domain: use a DNS name without a scheme, port or path.')
+def checkedSiteUrl = { String value, boolean vpn ->
+    def uri
+    try { uri = new URI(value) } catch (Exception ignored) { throw new GradleException('Invalid campus URL; check campus.local.properties.') }
+    def scheme = uri.scheme?.toLowerCase(Locale.ROOT)
+    def host = uri.host?.toLowerCase(Locale.ROOT)
+    if (!host || !(host == campusDomain || host.endsWith('.' + campusDomain)) || uri.rawUserInfo != null || uri.rawFragment != null || !(scheme in (vpn ? ['https'] : ['http','https'])) || (uri.port != -1 && uri.port != (scheme == 'https' ? 443 : 80))) throw new GradleException('Campus URL must use the configured domain, standard ports and no embedded credentials or fragment.')
+    return uri
+}
+def vpnUri = checkedSiteUrl(siteProperties.getProperty('campus.vpnUrl', 'https://vpn.campus.example.edu').trim(), true)
+def portalUri = checkedSiteUrl(siteProperties.getProperty('campus.portalListUrl', 'http://portal.campus.example.edu/list.jsp?urltype=tree.TreeTempUrl&wbtreeid=1000').trim(), false)
+ext.campusSite = [domain:campusDomain, vpnUrl:vpnUri.toString(), portalListUrl:portalUri.toString(), portalHost:portalUri.host.toLowerCase(Locale.ROOT), configured:localSiteFile.isFile() && !useTestDefaults && !campusDomain.endsWith('.example.edu')]
+tasks.register('validateVendorSdk') {
+    doLast {
+        if (!sangforSdkFile.isFile()) throw new GradleException('Sangfor SDK is not distributed here. Obtain an authorized AAR and set -PsangforSdk=/absolute/path/SangforSDK.aar; see BUILDING.md.')
+    }
+}

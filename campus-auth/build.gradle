@@ -1,0 +1,17 @@
+plugins { id 'com.android.library' }
+android {
+    namespace 'org.campusreader.auth'
+    compileSdk 36
+    defaultConfig { minSdk 23 }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+// Host packages the official AAR once. compileOnly avoids embedding proprietary binaries in this library.
+dependencies {
+    implementation project(':campus-config')
+    compileOnly files(rootProject.ext.sangforSdkFile)
+}
+
+tasks.named('preBuild').configure { dependsOn rootProject.tasks.named('validateVendorSdk') }

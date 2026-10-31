@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Project-authored layout, MIT. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="240dp" android:background="#202124">
+    <ImageView android:layout_width="match_parent" android:layout_height="match_parent" android:id="@+id/reader_photo_preview" android:scaleType="centerCrop" android:importantForAccessibility="no" />
+    <View android:layout_width="match_parent" android:layout_height="match_parent" android:id="@+id/reader_card_gradient" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_gravity="bottom" android:orientation="vertical" android:padding="20dp">
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:id="@+id/reader_content_txt" android:text="" android:textSize="17sp" android:textColor="#202124" android:maxLines="4" android:ellipsize="end" android:lineSpacingExtra="3dp" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="10dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:id="@+id/reader_title_txt" android:text="" android:textSize="12sp" android:textColor="#202124" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:id="@+id/reader_date" android:text="" android:textSize="12sp" android:textColor="#202124" />
+            <ImageView android:layout_width="16dp" android:layout_height="16dp" android:id="@+id/reader_image_star_lg" android:layout_marginStart="8dp" android:src="@drawable/reader_bookmark" android:visibility="gone" android:importantForAccessibility="no" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

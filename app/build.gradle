@@ -1,0 +1,70 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'org.campusreader.reader'
+    compileSdk 36
+    buildToolsVersion '36.0.0'
+    defaultConfig {
+        applicationId 'org.campusreader.reader'
+        minSdk 23
+        // Initial vendor-SDK proof build follows the supplied Demo's target.
+        // Raising targetSdk requires validating the vendor native tunnel lifecycle.
+        targetSdk 30
+        versionCode 7
+        versionName '0.4.2-campus'
+        ndk { abiFilters 'arm64-v8a' }
+    }
+    buildTypes {
+        debug { minifyEnabled false }
+        release { minifyEnabled false }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+        coreLibraryDesugaringEnabled true
+    }
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+            keepDebugSymbols += ['**/libsangforsdk.so']
+        }
+    }
+    lint {
+        // This APK is a vendor-SDK validation host, not a Google Play release.
+        // Retain the finding as a warning until target-SDK migration is tested.
+        warning 'ExpiredTargetSdkVersion'
+    }
+}
+
+dependencies {
+    implementation 'androidx.drawerlayout:drawerlayout:1.2.0'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.2.0'
+    implementation files(rootProject.ext.sangforSdkFile)
+    implementation project(':campus-auth')
+    implementation project(':campus-config')
+    implementation project(':campus-extension')
+    implementation project(':campus-portal')
+    implementation 'org.jsoup:jsoup:1.23.2'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.1.5'
+}
+
+tasks.named('preBuild').configure { dependsOn rootProject.tasks.named('validateVendorSdk') }
+def generatedSiteRes = layout.buildDirectory.dir('generated/site/res')
+android.sourceSets.main.res.srcDir generatedSiteRes
+tasks.register('generateSiteNetworkSecurity') {
+    inputs.property('portalHost', rootProject.ext.campusSite.portalHost)
+    outputs.dir(generatedSiteRes)
+    doLast {
+        def output = generatedSiteRes.get().file('xml/network_security_config.xml').asFile
+        output.parentFile.mkdirs()
+        output.text = """<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">${rootProject.ext.campusSite.portalHost}</domain>
+    </domain-config>
+</network-security-config>
+"""
+    }
+}
+tasks.named('preBuild').configure { dependsOn tasks.named('generateSiteNetworkSecurity') }

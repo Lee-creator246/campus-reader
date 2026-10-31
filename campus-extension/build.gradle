@@ -1,0 +1,15 @@
+// Import from an Android project that supplies a compatible Android Gradle plugin and repositories.
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    namespace 'org.campusreader.notices'
+    compileSdk 36
+
+    defaultConfig { minSdk 23 }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}

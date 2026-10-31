@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Project-authored layout, MIT. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="56dp" android:orientation="horizontal" android:gravity="center_vertical">
+    <View android:layout_width="3dp" android:layout_height="match_parent" android:id="@+id/reader_ll_selected" android:background="#2767D8" />
+    <ImageView android:layout_width="24dp" android:layout_height="24dp" android:id="@+id/reader_image" android:layout_marginStart="18dp" android:layout_marginEnd="20dp" android:importantForAccessibility="no" />
+    <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:id="@+id/reader_text" android:text="" android:textSize="16sp" android:textColor="#202124" android:layout_weight="1" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:id="@+id/reader_textCount" android:text="" android:textSize="13sp" android:textColor="#202124" android:layout_marginEnd="20dp" />
+</LinearLayout>

@@ -1,0 +1,22 @@
+plugins { id 'java' }
+java { sourceCompatibility = JavaVersion.VERSION_1_8; targetCompatibility = JavaVersion.VERSION_1_8 }
+dependencies { implementation 'org.jsoup:jsoup:1.23.2'; implementation project(':campus-config') }
+sourceSets.main.java {
+    srcDir '../campus-extension/src/main/java'
+    srcDir '../campus-portal/src/main/java'
+    srcDir '../app/src/main/java'
+    include '**/NoticeKey.java', '**/CanonicalUrlIdentity.java', '**/CampusNotice.java', '**/CachedNotice.java', '**/NoticeTag.java'
+    include '**/CampusPortalParser.java', '**/KeywordTerms.java', '**/SyncGate.java', '**/RssParser.java', '**/NoticeRefreshPlan.java', '**/MediaSafety.java', '**/PortalBatchDownloader.java', '**/DeferredPortalRefresh.java'
+    include '**/*Checks.java'
+}
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+def suites = [keywordTerms:'org.campusreader.reader.KeywordTermsChecks',syncGate:'org.campusreader.reader.SyncGateChecks',metadata:'org.campusreader.notices.MetadataRefreshChecks',rss:'org.campusreader.reader.RssChecks',refresh:'org.campusreader.reader.RefreshLifecycleChecks',media:'org.campusreader.reader.MediaSafetyChecks',identity:'IdentityChecks',parser:'ParserChecks']
+suites.each { taskName, entry ->
+    tasks.register(taskName, JavaExec) {
+        dependsOn tasks.named('classes')
+        classpath = sourceSets.main.runtimeClasspath
+        mainClass = entry
+    }
+}
+tasks.register('verify') { dependsOn suites.keySet().collect { tasks.named(it) } }
+tasks.named('check') { dependsOn tasks.named('verify') }
