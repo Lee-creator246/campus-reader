@@ -1,38 +1,50 @@
 # 公开源码验证范围
 
-版本：`0.4.2-campus`。验证日期：2026-10-31。以下结果针对本轮最终修改后的公开源码。
+版本：`0.5.0-campus`，版本号 `8`。验证日期：2026-10-31。以下结果针对本轮运行时配置和站点隔离修改后的代码及本地 Release APK。
 
-## 本轮实际执行
+## 本轮验证状态
 
-使用 JDK 17 和本机 Gradle 8.11.1 发行版完成检查。Wrapper 首次下载超时，因此本轮不记录为 Wrapper 启动成功。构建临时使用 C1 JVM 参数，设置方式见 [BUILDING.md](../BUILDING.md)；未关闭测试或 Lint。以下 `gradle` 代表本轮使用的同版本本机发行版：
+核心 JVM 检查 **390 项全部通过**。完整 Release 构建及 Lint 成功，Lint 为 **0 错误、47 警告**。本轮使用 JDK 17 和本机 Gradle 8.11.1 发行版，配合 C1 JVM 参数；未关闭检查或 Lint。核心检查命令如下：
 
 ```sh
-gradle :checks:verify -PcampusTestDefaults=true
-gradle :app:assembleDebug :app:lintDebug -PcampusTestDefaults=true -PsangforSdk=/absolute/path/SangforSDK.aar
+gradle :checks:verify
 ```
 
-`:app:assembleDebug` 与 `:app:lintDebug` 均成功，Lint 为 **0 错误、50 警告**。该结果包含清理 SDK 原始错误信息和登录提示中的主机信息后的源码。Android 构建使用外部有权使用的 Sangfor AAR；工具链及接入方式见 [BUILDING.md](../BUILDING.md)。
+Android 工具链为 SDK 36 / Build Tools 36.0.0，构建使用本机外部提供的 Sangfor AAR。工具链、C1 JVM 参数及接入方式见 [BUILDING.md](../BUILDING.md)。本轮记录为本机 Gradle 发行版执行成功，不据此宣称 Wrapper 首次下载成功。
 
-在分页路径和类别也改为合成数据后，最终 `:checks:verify` 检查 **208 项全部通过**：
+新增检查覆盖默认配置为空、网址协议与端口、仿冒主机、未配置时的请求边界、稳定站点范围、动态切换门户和同名账号跨站点缓存命名空间隔离。
 
-| JVM 检查 | 通过项数 |
+| 核心 JVM 检查 | 通过项数 |
 | --- | ---: |
 | 稳定身份 | 13 |
 | 关键词词表边界 | 60 |
-| 媒体输入、重定向、流及文件名 | 31 |
+| 媒体输入、重定向、流及文件名 | 49 |
 | 元数据刷新与正文回收 | 15 |
-| 合成门户解析 | 34 |
+| 合成门户解析 | 41 |
 | 刷新协调与部分失败 | 23 |
 | RSS / Atom | 16 |
+| 运行时站点配置及隔离 | 157 |
 | 刷新锁与时间边界 | 16 |
-| 合计 | 208 |
+| 合计 | 390 |
 
-以上任务均通过 `-PcampusTestDefaults=true` 强制使用示例站点，未使用真实账号，也未进行真机回归。生成的示例配置 App 不允许真实校园登录。核心任务使用生产 Java 实现和合成数据，无需校园账号、Android SDK 或厂商 AAR；首次执行仍需下载构建依赖。
+另有 **54 项配置生命周期主机检查全部通过**，使用替代实现模拟 Android 偏好存储、Looper 和认证控制器。这组检查独立于上表，用于验证配置生命周期；它们没有运行在 Android 设备上，不能证明真实 SDK、WebView 或系统回调的行为。
+
+核心任务使用生产 Java 实现和合成数据，各套件显式安装通用测试配置，不读取实际站点或账号。任务无需校园账号、Android SDK 或厂商 AAR；首次执行仍需下载构建依赖。生产 App 默认未配置，可由用户在安装后填写合法配置；测试配置不会成为生产默认值。
+
+## 本地 APK 核验
+
+- Release APK 使用通用项目证书签名，v1、v2、v3 签名验证均通过，调试标志为 `false`。私有签名密钥库已排除在公开仓库和发布文件之外。
+- 最终 Manifest 包含校园配置 Activity 和非导出的 `ConsentStorageProvider`；原始厂商 `HSProvider` 不存在。原 Provider 的移除规则位于优先级最高的 App Manifest，并已检查最终合并结果。
+- 已知学校、个人及开发环境引用的扫描命中为 0；旧阅读器 PNG 和布局资源为 0；私钥及应用数据文件为 0；未包含废弃的 `SiteValues` 站点常量。
+
+APK 仍包含专有 SDK，其对外再分发许可尚未确认；本地签名与扫描通过不代表可发布该 APK。本轮未上传 GitHub Release。公开源码检查通过，源码包包含 113 个项目文件及逐文件 SHA-256 清单；ZIP 完整性与清单核验通过，不包含 SDK、APK、本机配置或签名密钥。
 
 ## 尚需单独验证的行为
 
+- 本轮没有连接手机，未执行设备界面、实际校园认证或厂商 SDK IPC 验证。
 - JVM 合成测试不能代替 Android SQLite、界面、设备通知或校园连接验证。
 - 校园动态码、门户 SSO、账号切换和真实内容访问，需在有权使用且已配置的目标系统中验证。
+- 首次保存后继续认证、SDK 启动后改配置并重新打开、Provider 延迟初始化、配置变更后的 Cookie 清除，需在真机及目标 SDK 上验证。
 - 新通知的横幅与声音、系统后台调度及电池管理行为，需在目标 Android 版本上验证。
 - 当前门户解析器依赖特定页面结构；替换站点参数后，需要验证或调整页面、分页和附件适配。
 - GitHub Actions 的实际执行结果应以对应远程运行记录为准。

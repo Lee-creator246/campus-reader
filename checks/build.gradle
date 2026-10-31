@@ -10,7 +10,7 @@ sourceSets.main.java {
     include '**/*Checks.java'
 }
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
-def suites = [keywordTerms:'org.campusreader.reader.KeywordTermsChecks',syncGate:'org.campusreader.reader.SyncGateChecks',metadata:'org.campusreader.notices.MetadataRefreshChecks',rss:'org.campusreader.reader.RssChecks',refresh:'org.campusreader.reader.RefreshLifecycleChecks',media:'org.campusreader.reader.MediaSafetyChecks',identity:'IdentityChecks',parser:'ParserChecks']
+def suites = [siteConfig:'SiteConfigChecks',keywordTerms:'org.campusreader.reader.KeywordTermsChecks',syncGate:'org.campusreader.reader.SyncGateChecks',metadata:'org.campusreader.notices.MetadataRefreshChecks',rss:'org.campusreader.reader.RssChecks',refresh:'org.campusreader.reader.RefreshLifecycleChecks',media:'org.campusreader.reader.MediaSafetyChecks',identity:'IdentityChecks',parser:'ParserChecks']
 suites.each { taskName, entry ->
     tasks.register(taskName, JavaExec) {
         dependsOn tasks.named('classes')

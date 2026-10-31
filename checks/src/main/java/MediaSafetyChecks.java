@@ -1,5 +1,6 @@
 package org.campusreader.reader;
 
+import org.campusreader.config.CampusSite;
 import com.sun.net.httpserver.HttpServer;
 import java.io.*;
 import java.net.*;
@@ -16,14 +17,31 @@ public final class MediaSafetyChecks {
     }
     private static void check(boolean value){if(!value)throw new AssertionError();checks++;}
     public static void main(String[] args) throws Exception {
-        String campus="campus:a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3";
-        check(MediaSafety.readerProfile("123").equals(campus));
+        check(!CampusSite.isConfigured());
+        check(MediaSafety.readerProfile("123").equals("local"));
+        rejects(()->MediaSafety.checked("https://portal.campus.example.edu/file",true));
+        CampusSite.Profile fixture=CampusSite.create("campus.example.edu","https://vpn.campus.example.edu/",
+                "http://portal.campus.example.edu/list.jsp?urltype=tree.TreeTempUrl&wbtreeid=1000","https://auth.campus.example.edu/login");
+        CampusSite.install(fixture);
+        String campus=MediaSafety.readerProfile("123");
+        check(campus.matches("campus:[0-9a-f]{64}"));
         check(MediaSafety.readerProfile(" 123 ").equals(campus));
         check(MediaSafety.readerProfile(null).equals("local"));
         check(MediaSafety.readerProfile("").equals("local"));
         check(MediaSafety.readerProfile(" \t ").equals("local"));
         check(!MediaSafety.readerProfile("123").equals("123"));
         check(!MediaSafety.readerProfile("123").equals(MediaSafety.readerProfile("456")));
+        CampusSite.install(CampusSite.create("second.example.edu","https://vpn.second.example.edu/",
+                "https://portal.second.example.edu/list.jsp?urltype=tree.TreeTempUrl&wbtreeid=1000","https://auth.second.example.edu/login"));
+        check(!MediaSafety.readerProfile("123").equals(campus));
+        check(MediaSafety.campus(new URL("https://portal.second.example.edu/file")));
+        check(!MediaSafety.campus(new URL("https://portal.campus.example.edu/file")));
+        CampusSite.install(fixture);
+        check(MediaSafety.readerProfile("123").equals(campus));
+        CampusSite.install(CampusSite.create("campus.example.edu","https://vpn.campus.example.edu/",
+                "http://portal.campus.example.edu/list.jsp?urltype=tree.TreeTempUrl&wbtreeid=1001","https://auth.campus.example.edu/login"));
+        check(!MediaSafety.readerProfile("123").equals(campus));
+        CampusSite.install(fixture);
         check(MediaSafety.failureCode(new java.net.SocketTimeoutException("https://private.invalid/?secret=never-log")).equals("TIMEOUT"));
         check(MediaSafety.failureCode(new MediaSafety.Rejected("SIZE_LIMIT")).equals("SIZE_LIMIT"));
         check(MediaSafety.failureCode(new MediaSafety.Rejected("LOGIN_OR_HTML")).equals("LOGIN_OR_HTML"));
@@ -51,7 +69,17 @@ public final class MediaSafetyChecks {
             rejects(()->MediaSafety.redirect(campusUrl,campusUrl,"http://portal.campus.example.edu/file",true));
             rejects(()->MediaSafety.checked("https://portal.campus.example.edu.evil.example/file",true));
             rejects(()->MediaSafety.checked("https://user:secret@portal.campus.example.edu/file",true));
+            rejects(()->MediaSafety.checked("https://portal.campus.example.edu:80/file",true));
+            rejects(()->MediaSafety.checked("http://portal.campus.example.edu:443/file",true));
+            rejects(()->MediaSafety.checked("https://portal.campus.example.edu:8443/file",true));
+            rejects(()->MediaSafety.checked("https://portal.campus.example.edu/file#fragment",true));
+            rejects(()->MediaSafety.checked("ftp://portal.campus.example.edu/file",true));
+            check(MediaSafety.campus(new URL("https://portal.campus.example.edu:443/file")));
+            check(MediaSafety.campus(new URL("http://portal.campus.example.edu:80/file")));
+            check(!MediaSafety.campus(new URL("http://portal.campus.example.edu:443/file")));
             rejects(()->MediaSafety.checked("https://example.com:8080/file",false));
+            rejects(()->MediaSafety.checked("https://bad host.example.com/file",false));
+            rejects(()->MediaSafety.checked("http://portal.campus.example.edu/file",false));
             URL publicOrigin=new URL("https://images.example.com/a");
             rejects(()->MediaSafety.redirect(publicOrigin,publicOrigin,"https://other.example.com/b",false));
             check(MediaSafety.redirect(campusUrl,campusUrl,"/attachments/a.pdf",true).getHost().equals("portal.campus.example.edu"));

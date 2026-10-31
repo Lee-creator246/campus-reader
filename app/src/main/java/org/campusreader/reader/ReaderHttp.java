@@ -1,6 +1,8 @@
 package org.campusreader.reader;
 
 import org.campusreader.config.CampusSite;
+import org.campusreader.auth.CampusApplication;
+import org.campusreader.auth.CampusConfiguration;
 import android.webkit.CookieManager;
 import java.io.*;
 import java.net.*;
@@ -27,25 +29,34 @@ final class ReaderHttp {
         }
     }
     static Response get(String address,int byteLimit,boolean campusOnly) throws IOException {
+        String profile=campusOnly?MediaActions.activeProfile():"";
+        if(campusOnly)requireCampusSession(profile);
         URL current=checked(address,campusOnly);
         for(int redirects=0;redirects<=5;redirects++) {
+            if(campusOnly)requireCampusSession(profile);
+            current=checked(current.toString(),campusOnly);
             HttpURLConnection connection=(HttpURLConnection)current.openConnection();
             try {
                 connection.setConnectTimeout(15000); connection.setReadTimeout(20000);
                 connection.setInstanceFollowRedirects(false); connection.setRequestProperty("User-Agent",USER_AGENT);
                 connection.setRequestProperty("Accept-Encoding","identity");
                 if(campusOnly) {
+                    requireCampusSession(profile);
                     String cookie=CookieManager.getInstance().getCookie(current.toString());
                     if(cookie!=null&&!cookie.isEmpty()) connection.setRequestProperty("Cookie",cookie);
                 }
                 int status=connection.getResponseCode();
+                if(campusOnly)requireCampusSession(profile);
                 if(campusOnly) for(Map.Entry<String,List<String>> h:connection.getHeaderFields().entrySet())
-                    if("set-cookie".equalsIgnoreCase(h.getKey())) for(String value:h.getValue()) CookieManager.getInstance().setCookie(current.toString(),value);
+                    if("set-cookie".equalsIgnoreCase(h.getKey())) for(String value:h.getValue()) {
+                        requireCampusSession(profile);CookieManager.getInstance().setCookie(current.toString(),value);
+                    }
                 String mime=connection.getContentType(); if(mime==null) mime="";
                 if(status==301||status==302||status==303||status==307||status==308) {
                     String location=connection.getHeaderField("Location");
                     if(location==null) return new Response(current.toString(),status,mime,new byte[0]);
                     URL next=new URL(current,location);
+                    if("https".equals(current.getProtocol())&&!"https".equals(next.getProtocol())) throw new MediaSafety.Rejected("HTTPS_DOWNGRADE");
                     // Report a portal SSO redirect to the parser; never send campus cookies to another origin.
                     if(campusOnly&&!isCampus(next.toString())) return new Response(next.toString(),status,mime,new byte[0]);
                     current=checked(next.toString(),campusOnly); continue;
@@ -57,18 +68,20 @@ final class ReaderHttp {
                 try(InputStream stream=input; ByteArrayOutputStream output=new ByteArrayOutputStream()) {
                     byte[] buffer=new byte[8192]; int count,total=0;
                     while((count=stream.read(buffer))!=-1) {total+=count;if(total>byteLimit)throw new IOException("Response exceeds size limit");output.write(buffer,0,count);}
+                    if(campusOnly)requireCampusSession(profile);
                     return new Response(current.toString(),status,mime,output.toByteArray());
                 }
             } finally {connection.disconnect();}
         }
         throw new IOException("Too many redirects");
     }
-    static boolean isCampus(String value) {try {URL url=new URL(value);return CampusSite.PORTAL_HOST.equalsIgnoreCase(url.getHost())&&url.getUserInfo()==null&&(url.getPort()==-1||url.getPort()==80||url.getPort()==443);}catch(Exception e){return false;}}
+    private static void requireCampusSession(String profile) throws IOException {
+        if(!CampusConfiguration.isConfigured())throw new MediaSafety.Rejected("ACCOUNT_CHANGED");
+        if(!profile.startsWith("campus:")||!MediaActions.currentProfile(profile))throw new MediaSafety.Rejected("ACCOUNT_CHANGED");
+        if(!CampusApplication.auth().isAccessReady())throw new MediaSafety.Rejected("CAMPUS_OFFLINE");
+    }
+    static boolean isCampus(String value) {return CampusSite.allowsPortalUrl(value);}
     static URL checked(String value,boolean campusOnly) throws IOException {
-        URL url=new URL(value); String protocol=url.getProtocol();
-        if(url.getUserInfo()!=null||!("https".equals(protocol)||"http".equals(protocol))) throw new IOException("Unsupported URL");
-        if(campusOnly&&!isCampus(value)) throw new IOException("Portal origin changed");
-        if(!"https".equals(protocol)&&!isCampus(value)) throw new IOException("Public subscriptions require HTTPS");
-        return url;
+        return MediaSafety.checked(value,campusOnly);
     }
 }

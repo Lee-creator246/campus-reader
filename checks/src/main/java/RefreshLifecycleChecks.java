@@ -1,6 +1,7 @@
 package org.campusreader.reader;
 
 import org.campusreader.notices.*;
+import org.campusreader.config.CampusSite;
 import org.campusreader.portal.CampusPortalParser;
 import java.io.IOException;
 import java.util.*;
@@ -23,6 +24,8 @@ public final class RefreshLifecycleChecks {
     }
     private static final PortalBatchDownloader.Progress PROGRESS=(position,total)->{};
     public static void main(String[] args)throws Exception {
+        CampusSite.install(CampusSite.create("campus.example.edu","https://vpn.campus.example.edu/",
+                "http://portal.campus.example.edu/list.jsp?urltype=tree.TreeTempUrl&wbtreeid=1000","https://auth.campus.example.edu/login"));
         DeferredPortalRefresh queue=new DeferredPortalRefresh();
         queue.request("account-A");queue.request("account-A");
         check(!queue.takeIfReady("account-A",true,false,true)&&queue.hasRequest(),"Login completion retained while request busy");

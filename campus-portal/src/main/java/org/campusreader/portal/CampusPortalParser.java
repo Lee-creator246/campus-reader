@@ -128,7 +128,7 @@ public final class CampusPortalParser {
             String url=safeResource(base,a.attr("href"));
             if (url==null) continue;
             URI uri=URI.create(url);
-            if (!CampusSite.PORTAL_HOST.equalsIgnoreCase(uri.getHost()) || !"/system/_content/download.jsp".equals(uri.getPath())) continue;
+            if (!CampusSite.allowsPortalUrl(url) || !"/system/_content/download.jsp".equals(uri.getPath())) continue;
             Map<String,String> params=query(uri);
             if (!"news.DownloadAttachUrl".equals(params.get("urltype"))) throw fail(Failure.UNKNOWN_STRUCTURE,"Unexpected attachment link format");
             digits(params.get("wbfileid")); digits(params.get("owner"));
@@ -177,7 +177,7 @@ public final class CampusPortalParser {
         if (status==403) throw fail(Failure.ACCESS_DENIED,"Portal denied access");
         URI uri;
         try {uri=URI.create(url);} catch (RuntimeException e) {throw fail(Failure.UNKNOWN_STRUCTURE,"Invalid final response URL");}
-        if (!CampusSite.PORTAL_HOST.equalsIgnoreCase(uri.getHost()) || uri.getPath().toLowerCase(Locale.ROOT).matches(".*(login|passport|/cas/).*"))
+        if (!CampusSite.portalHost().equalsIgnoreCase(uri.getHost()) || (uri.getPath()!=null && uri.getPath().toLowerCase(Locale.ROOT).matches(".*(login|passport|/cas/).*")))
             throw fail(Failure.REAUTH_REQUIRED,"Portal redirected to authentication or another origin");
         if (status!=200) throw fail(Failure.HTTP_ERROR,"Unexpected HTTP status: "+status);
         portalUri(url);
@@ -195,13 +195,12 @@ public final class CampusPortalParser {
     private static URI portalUri(String url) throws ParseException {
         try {
             URI uri=URI.create(url);
-            boolean http="http".equalsIgnoreCase(uri.getScheme()), https="https".equalsIgnoreCase(uri.getScheme());
-            if ((!http&&!https) || !CampusSite.PORTAL_HOST.equalsIgnoreCase(uri.getHost()) || uri.getRawUserInfo()!=null || uri.getRawFragment()!=null || (uri.getPort()!=-1 && uri.getPort()!=(http?80:443)))
+            if (!CampusSite.allowsPortalUrl(url))
                 throw new IllegalArgumentException();
             return uri;
         } catch (RuntimeException e) {throw fail(Failure.INVALID_IDENTITY,"URL is not the expected portal origin");}
     }
-    private static String origin(URI uri) {return uri.getScheme().toLowerCase(Locale.ROOT)+"://"+CampusSite.PORTAL_HOST;}
+    private static String origin(URI uri) {return uri.getScheme().toLowerCase(Locale.ROOT)+"://"+CampusSite.portalHost();}
     private static String resolve(URI base,String relative) throws ParseException {
         try {return base.resolve(relative.trim()).normalize().toString();}
         catch (RuntimeException e) {throw fail(Failure.UNKNOWN_STRUCTURE,"Invalid relative URL");}

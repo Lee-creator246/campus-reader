@@ -4,7 +4,7 @@ import hashlib,json,zipfile
 from check_public_tree import ROOT,public_files,validate
 files=[p for p in public_files() if p.name!='SOURCE_MANIFEST.json'];validate(files)
 destination=ROOT/'dist';destination.mkdir(exist_ok=True)
-name='campus-reader-0.4.2-source'
+name='campus-reader-0.5.0-source'
 archive=destination/(name+'.zip')
 manifest={}
 with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=9) as output:

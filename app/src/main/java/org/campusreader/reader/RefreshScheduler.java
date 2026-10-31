@@ -20,7 +20,7 @@ public final class RefreshScheduler {
         ReaderPreferences prefs=new ReaderPreferences(context);
         JobScheduler scheduler=(JobScheduler)context.getSystemService(Context.JOB_SCHEDULER_SERVICE);
         if(scheduler==null)return false;
-        if(!prefs.isBackgroundEnabled()){scheduler.cancel(JOB_ID);return true;}
+        if(!org.campusreader.auth.CampusConfiguration.isConfigured()||!prefs.isBackgroundEnabled()){scheduler.cancel(JOB_ID);return true;}
         long interval=TimeUnit.MINUTES.toMillis(prefs.getIntervalMinutes());
         try {
             // Calling schedule on every resume would reset the period and stop an active job.

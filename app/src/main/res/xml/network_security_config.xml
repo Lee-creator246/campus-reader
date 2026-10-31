@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- User-configured legacy portals may require HTTP. App network clients and
+         the portal WebView enforce the runtime host/scheme boundary. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

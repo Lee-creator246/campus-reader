@@ -1,4 +1,5 @@
 import org.campusreader.portal.CampusPortalParser;
+import org.campusreader.config.CampusSite;
 import org.campusreader.portal.CampusPortalParser.*;
 import java.nio.file.*;
 import java.nio.charset.StandardCharsets;
@@ -23,6 +24,8 @@ public class ParserChecks {
     static String detail(String contents,String extra) {return "<form name='_newscontent_fromname'><div><h1>Synthetic title</h1><div>2026-10-30&nbsp;Office&nbsp;clicks[<script>counter()</script>]</div><hr><div id='vsb_content_100'><div class='v_news_content'>"+contents+"</div></div>"+extra+"<p>Next: <a href='"+url("104","54")+"'>Another notice</a></p></div></form>";}
     static String item(String id,String tree) {return "<news id='"+id+"'><showTitle><![CDATA[Synthetic page title]]></showTitle><showDate>2026-10-29</showDate><picUrl/><url><![CDATA[../xntz_content.jsp?urltype=news.NewsContentUrl&wbtreeid="+tree+"&wbnewsid="+id+"]]></url><showAbstract>Unused summary</showAbstract></news>";}
     public static void main(String[] args) throws Exception {
+        CampusSite.Profile fixture=CampusSite.create("campus.example.edu","https://vpn.campus.example.edu/",LIST,"https://auth.campus.example.edu/login");
+        CampusSite.install(fixture);
         String list=listing(row("100","51","2026-01-01")+row("101","52","2026-10-30"));
         Page page=parser.parseList(LIST,200,list);
         check(page.notices.size()==2,"Skip template");
@@ -64,6 +67,17 @@ public class ParserChecks {
         rejects(Failure.UNKNOWN_STRUCTURE,()->parser.parseMore(page.next.url(),200,"<!DOCTYPE data [<!ENTITY a SYSTEM 'file:///etc/passwd'>]><data/>",page.next));
         rejects(Failure.INVALID_IDENTITY,()->parser.parseMore(page.next.url(),200,"<data>"+item("102","52").replace("id='102'","id='999'")+"</data>",page.next));
         rejects(Failure.UNKNOWN_STRUCTURE,()->parser.parseMore(page.next.url().replace("start=2","start=99"),200,"<data/>",page.next));
+        rejects(Failure.INVALID_IDENTITY,()->parser.parseList(LIST.replace(BASE,BASE+":443"),200,list));
+        rejects(Failure.INVALID_IDENTITY,()->parser.parseList(LIST.replace(BASE,"https://portal.campus.example.edu:80"),200,list));
+        rejects(Failure.INVALID_IDENTITY,()->parser.parseList(LIST+"#fragment",200,list));
+        rejects(Failure.INVALID_IDENTITY,()->parser.parseList(LIST.replace(BASE,"http://user@portal.campus.example.edu"),200,list));
+        CampusSite.install(CampusSite.create("second.example.edu","https://vpn.second.example.edu/",
+                LIST.replace("campus.example.edu","second.example.edu"),"https://auth.second.example.edu/login"));
+        rejects(Failure.REAUTH_REQUIRED,()->parser.parseList(LIST,200,list));
+        Page second=parser.parseList(LIST.replace("campus.example.edu","second.example.edu"),200,list.replace("campus.example.edu","second.example.edu"));
+        check(second.notices.size()==2 && second.next.url().startsWith("http://portal.second.example.edu/"),"Parser follows installed site at runtime");
+        CampusSite.install(fixture);
+        check(parser.parseList(LIST,200,list).notices.size()==2,"Original site restores without rebuilding parser");
         System.out.println("Synthetic parser checks passed: "+checks);
     }
 }

@@ -57,7 +57,7 @@ public final class MediaActions {
     }
     public static void viewDownloads(Activity activity){activity.startActivity(new Intent(activity,MediaDownloadsActivity.class));}
     static boolean alive(Activity activity){return !activity.isFinishing()&&!activity.isDestroyed();}
-    public static String activeProfile(){return MediaSafety.readerProfile(org.campusreader.auth.CampusApplication.auth().getProfileId());}
+    public static String activeProfile(){return org.campusreader.auth.CampusConfiguration.isConfigured()?MediaSafety.readerProfile(org.campusreader.auth.CampusApplication.auth().getProfileId()):"local";}
     static boolean currentProfile(String profile){return profile!=null&&profile.equals(activeProfile());}
     static boolean currentEntry(MediaTransfer.Entry entry){return entry!=null&&entry.profileHash.equals(MediaTransfer.hash(activeProfile()));}
     static void toast(Context context,String value){Toast.makeText(context.getApplicationContext(),value,Toast.LENGTH_LONG).show();}

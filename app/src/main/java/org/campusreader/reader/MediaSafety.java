@@ -25,9 +25,10 @@ final class MediaSafety {
     }
     /** Same profile contract as ReaderActivity: never use a raw SDK account as a media namespace. */
     static String readerProfile(String account) {
-        if(account==null||account.trim().isEmpty())return "local";
+        String site=CampusSite.scopeId();
+        if(site.isEmpty()||account==null||account.trim().isEmpty())return "local";
         try {
-            byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(account.trim().getBytes(StandardCharsets.UTF_8));
+            byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest((site+'\0'+account.trim()).getBytes(StandardCharsets.UTF_8));
             StringBuilder hex=new StringBuilder();for(byte value:digest)hex.append(String.format(Locale.ROOT,"%02x",value&255));
             return "campus:"+hex;
         }catch(java.security.NoSuchAlgorithmException impossible){throw new AssertionError(impossible);}
@@ -43,14 +44,15 @@ final class MediaSafety {
         return total;
     }
     static boolean campus(URL url) {
-        return CampusSite.PORTAL_HOST.equalsIgnoreCase(url.getHost()) && url.getUserInfo() == null
-                && (url.getPort() == -1 || url.getPort() == 80 || url.getPort() == 443);
+        return url!=null && CampusSite.allowsPortalUrl(url.toString());
     }
     static URL checked(String address, boolean campus) throws IOException {
         URL url = new URL(address);
+        try {if(url.toURI().getHost()==null)throw new Rejected("URL_POLICY");}
+        catch(URISyntaxException invalid){throw new Rejected("URL_POLICY");}
         if (url.getUserInfo() != null || url.getHost().isEmpty() || url.getRef() != null) throw new Rejected("URL_POLICY");
         if (campus) {
-            if (!campus(url) || !("http".equals(url.getProtocol()) || "https".equals(url.getProtocol()))) throw new Rejected("ORIGIN_CHANGED");
+            if (!campus(url)) throw new Rejected("ORIGIN_CHANGED");
         } else if (!"https".equals(url.getProtocol()) || (url.getPort() != -1 && url.getPort() != 443)
                 || !url.getHost().contains(".") || url.getHost().matches("[0-9.]+") || url.getHost().contains(":")) {
             throw new Rejected("URL_POLICY");

@@ -4,18 +4,16 @@ import android.app.Application;
 import android.content.Context;
 import android.app.ActivityManager;
 import android.os.Build;
-import android.os.Handler;
-import android.os.Looper;
 import android.app.Activity;
 import android.os.Bundle;
 
-/** SDK must initialize before networking, including in secondary app processes. */
+/** Loads private settings without starting the connection SDK or making a network request. */
 public class CampusApplication extends Application {
     private static CampusApplication instance;
     private CampusAuthController controller;
     @Override protected void attachBaseContext(Context base) {
         super.attachBaseContext(base);
-        CampusSdk.initialize(base);
+        CampusConfiguration.load(base);
     }
     @Override public void onCreate() {
         super.onCreate();
@@ -26,6 +24,7 @@ public class CampusApplication extends Application {
                 @Override public void onActivityStarted(Activity activity) {
                     // A scheduled job may create Application without a visible screen. Only a
                     // user-visible activity may start SDK restoration / Android VPN consent.
+                    if (activity instanceof CampusConfigActivity) return;
                     controller.restoreSessionIfPossible();
                     controller.synchronizeSdkState();
                 }

@@ -16,7 +16,6 @@ import java.util.List;
 
 /** Worker-thread one-page sync. It never starts authentication, launches UI, or logs credentials. */
 public final class CampusSyncEngine {
-    public static final String LIST_URL=CampusSite.PORTAL_LIST_URL;
     public enum Status { SUCCESS, PARTIAL, BUSY, NO_PROFILE, TUNNEL_REQUIRED, PORTAL_LOGIN_REQUIRED, ACCOUNT_CHANGED, CANCELLED, NETWORK_ERROR, PARSE_ERROR }
     public interface CancelCheck { boolean isCancelled(); }
     /** Called on the sync worker after list validation; contains counts only, never notice/session data. */
@@ -40,7 +39,7 @@ public final class CampusSyncEngine {
     }
     private CampusSyncEngine(){}
     public static SyncGate.Lease tryAcquire(String profile){return SyncGate.tryAcquire(profile);}
-    public static String currentProfile(){String account=CampusApplication.auth().getProfileId();return account==null||account.trim().isEmpty()?"":"campus:"+RssParser.digest(account.trim());}
+    public static String currentProfile(){String account=CampusApplication.auth().getProfileId();return account==null||account.trim().isEmpty()?"":MediaSafety.readerProfile(account);}
     public static Result syncPage(Context context,String profile,CampusPortalParser.MoreRequest request,boolean background,CancelCheck cancel){
         return syncPage(context,profile,request,background,cancel,null);
     }
@@ -69,7 +68,7 @@ public final class CampusSyncEngine {
             store.enforceRetention(System.currentTimeMillis());
             Status guard=check(profile,generation,prefs,cancel,deadline);
             if(guard!=null)return result(guard,profile,0,0,0,0,request);
-            String cookie=CookieManager.getInstance().getCookie(LIST_URL);
+            String cookie=CookieManager.getInstance().getCookie(CampusSite.portalListUrl());
             if((background&&!profile.equals(prefs.getPortalProfile()))||cookie==null||cookie.trim().isEmpty()){
                 store.setConnectionState(CampusPortalParser.SOURCE,CampusNoticeStore.ConnectionState.REAUTH_REQUIRED);
                 signalPortal(context,profile,generation,true);
@@ -77,7 +76,7 @@ public final class CampusSyncEngine {
             }
             CampusPortalParser parser=new CampusPortalParser();
             try {
-                ReaderHttp.Response response=ReaderHttp.get(request==null?LIST_URL:request.url(),5*1024*1024,true);
+                ReaderHttp.Response response=ReaderHttp.get(request==null?CampusSite.portalListUrl():request.url(),5*1024*1024,true);
                 guard=check(profile,generation,prefs,cancel,deadline);
                 if(guard!=null)return result(guard,profile,0,0,0,0,request);
                 CampusPortalParser.Page page=request==null?parser.parseList(response.url,response.status,response.text()):parser.parseMore(response.url,response.status,response.text(),request);

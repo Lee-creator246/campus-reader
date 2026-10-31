@@ -1,25 +1,3 @@
-import groovy.json.JsonOutput
 plugins { id 'java-library' }
 java { sourceCompatibility = JavaVersion.VERSION_1_8; targetCompatibility = JavaVersion.VERSION_1_8 }
-def generated = layout.buildDirectory.dir('generated/site/java')
-sourceSets.main.java.srcDir generated
-tasks.register('generateSiteValues') {
-    inputs.properties(rootProject.ext.campusSite)
-    outputs.dir(generated)
-    doLast {
-        def values = rootProject.ext.campusSite
-        def output = generated.get().file('org/campusreader/config/SiteValues.java').asFile
-        output.parentFile.mkdirs()
-        output.text = """package org.campusreader.config;
-final class SiteValues {
-    static final String DOMAIN = ${JsonOutput.toJson(values.domain)};
-    static final String VPN_URL = ${JsonOutput.toJson(values.vpnUrl)};
-    static final String PORTAL_LIST_URL = ${JsonOutput.toJson(values.portalListUrl)};
-    static final String PORTAL_HOST = ${JsonOutput.toJson(values.portalHost)};
-    static final boolean CONFIGURED = ${values.configured};
-}
-"""
-    }
-}
-tasks.named('compileJava') { dependsOn tasks.named('generateSiteValues') }
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }

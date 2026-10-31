@@ -22,4 +22,4 @@ jobs:
       - name: Check public source boundary
         run: python3 scripts/check_public_tree.py --tracked
       - name: Verify core behavior with synthetic data
-        run: bash ./gradlew :checks:verify -PcampusTestDefaults=true --no-daemon --console=plain
+        run: bash ./gradlew :checks:verify --no-daemon --console=plain

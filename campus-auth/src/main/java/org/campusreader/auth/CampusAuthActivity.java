@@ -26,6 +26,7 @@ import com.sangfor.sdk.base.SFRandCodeMessage;
 
 /** Native account/dynamic-password UI; authentication truth remains owned by CampusAuthController. */
 public final class CampusAuthActivity extends Activity implements CampusAuthController.Listener {
+    private static final int CONFIGURATION = 201;
     private static final int BLUE=0xff2767d8,INK=0xff202124,MUTED=0xff647082,BACKGROUND=0xfff5f6f8;
     private CampusAuthController auth;
     private TextView status,stateBadge;
@@ -37,6 +38,10 @@ public final class CampusAuthActivity extends Activity implements CampusAuthCont
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        if(!CampusConfiguration.isConfigured()){
+            startActivityForResult(new Intent(this,CampusConfigActivity.class),CONFIGURATION);
+            return;
+        }
         getWindow().setStatusBarColor(Color.WHITE);
         getWindow().setNavigationBarColor(android.os.Build.VERSION.SDK_INT>=26?Color.WHITE:INK);
         int systemUi=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
@@ -46,6 +51,7 @@ public final class CampusAuthActivity extends Activity implements CampusAuthCont
         autoReturnAfterConnect=!auth.isAccessReady()&&!getIntent().getBooleanExtra("manageConnection",false);
 
         LinearLayout root=column();root.setBackgroundColor(BACKGROUND);
+        if(android.os.Build.VERSION.SDK_INT>=26)root.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
         LinearLayout toolbar=new LinearLayout(this);toolbar.setOrientation(LinearLayout.HORIZONTAL);toolbar.setGravity(Gravity.CENTER_VERTICAL);toolbar.setBackgroundColor(Color.WHITE);toolbar.setPadding(dp(8),dp(4),dp(16),dp(4));toolbar.setMinimumHeight(dp(56));
         Button back=button("‹",false);back.setTextSize(30);back.setContentDescription("返回阅读");back.setBackgroundColor(Color.TRANSPARENT);back.setOnClickListener(v->finish());toolbar.addView(back,new LinearLayout.LayoutParams(dp(48),dp(48)));
         TextView toolbarTitle=text("校园连接",20,INK);toolbarTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);toolbarTitle.setPadding(dp(8),0,0,0);toolbar.addView(toolbarTitle,new LinearLayout.LayoutParams(0,-2,1));root.addView(toolbar);
@@ -53,10 +59,11 @@ public final class CampusAuthActivity extends Activity implements CampusAuthCont
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         LinearLayout page=column();page.setPadding(dp(20),dp(24),dp(20),dp(24));scroll.addView(page);
         TextView school=text("校园访问",22,INK);school.setTypeface(Typeface.DEFAULT,Typeface.BOLD);page.addView(school);
-        TextView explanation=text("建立校园访问连接后，即可获取校内通知。信息门户的学生账号密码登录将单独完成。",14,MUTED);explanation.setLineSpacing(dp(3),1);add(page,explanation,8);
+        TextView explanation=text("先用校园账号和动态密码建立访问通道，再返回阅读页单独登录信息门户。门户账号密码不会交给校园连接界面。",14,MUTED);explanation.setLineSpacing(dp(3),1);add(page,explanation,8);
 
         LinearLayout form=card();add(page,form,24);
         account=new EditText(this);account.setId(View.generateViewId());account.setHint("请输入学工号");account.setSingleLine(true);account.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);styleInput(account);
+        account.setSaveEnabled(false);
         TextView accountLabel=text("学工号",14,INK);accountLabel.setLabelFor(account.getId());form.addView(accountLabel);add(form,account,8);account.setText(auth.getProfileId());
         password=new EditText(this);password.setId(View.generateViewId());password.setHint("请输入六位动态密码");password.setSingleLine(true);password.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);styleInput(password);
         password.setSaveEnabled(false);if(android.os.Build.VERSION.SDK_INT>=26)password.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
@@ -81,13 +88,22 @@ public final class CampusAuthActivity extends Activity implements CampusAuthCont
 
         returnToReader.setOnClickListener(v->{if(auth.isAccessReady())finishConnected();else finish();});
         login.setOnClickListener(v->{String code=password.getText().toString();password.setText("");autoReturnAfterConnect=true;
-            try{auth.login(account.getText().toString(),code);}catch(RuntimeException e){status.setText(CampusSite.CONFIGURED?"未能开始认证，请检查账号、动态密码和连接状态后重试。":"请先配置校园访问参数并重新构建应用");}});
+            try{auth.login(account.getText().toString(),code);}catch(RuntimeException e){status.setText(CampusConfiguration.isConfigured()?"未能开始认证，请检查账号、动态密码和连接状态后重试。":"请先完成校园配置，或关闭应用后重新打开。");}});
         cancel.setOnClickListener(v->{auth.cancel();challengeBox.removeAllViews();challengeBox.setVisibility(View.GONE);});
         disconnect.setOnClickListener(v->{auth.disconnect();challengeBox.removeAllViews();challengeBox.setVisibility(View.GONE);});
         setContentView(root);
     }
-    @Override protected void onResume(){super.onResume();auth.setListener(this);}
-    @Override protected void onPause(){auth.removeListener(this);super.onPause();}
+    @Override protected void onResume(){super.onResume();if(auth!=null)auth.setListener(this);}
+    @Override protected void onPause(){if(auth!=null)auth.removeListener(this);super.onPause();}
+    @Override protected void onActivityResult(int request,int result,Intent data){
+        super.onActivityResult(request,result,data);
+        if(request!=CONFIGURATION)return;
+        if(result==RESULT_OK){recreate();return;}
+        if(result==CampusConfigActivity.RESULT_RESTART_REQUIRED){
+            finishAffinity();
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(()->android.os.Process.killProcess(android.os.Process.myPid()),200);
+        }else finish();
+    }
     @Override public void onState(CampusAuthController.State state,long code,String message){
         status.setText(message+(code==0?"":"\n错误码："+code));
         boolean busy=state==CampusAuthController.State.RESTORING||state==CampusAuthController.State.AUTHENTICATING||state==CampusAuthController.State.CHALLENGE_REQUIRED||state==CampusAuthController.State.STARTING_TUNNEL;

@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 
 /** Non-secret UI/scheduling preferences. Portal ownership is a local hashed profile, never a cookie. */
 public final class ReaderPreferences {
+    public static String lastProfileKey(){return "lastProfile:"+org.campusreader.config.CampusSite.scopeId();}
     private static final Object SESSION_LOCK = new Object();
     private final SharedPreferences prefs;
     public ReaderPreferences(Context context) { prefs=context.getApplicationContext().getSharedPreferences("reader-settings",Context.MODE_PRIVATE); }

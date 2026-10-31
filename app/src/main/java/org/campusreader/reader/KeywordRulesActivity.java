@@ -77,7 +77,7 @@ public final class KeywordRulesActivity extends Activity {
     private boolean ownsProfile(){
         if(profile==null||profile.trim().isEmpty())return false;
         String current=CampusSyncEngine.currentProfile();
-        if(current==null||current.isEmpty())current=getSharedPreferences("reader-local",MODE_PRIVATE).getString("lastProfile","local");
+        if(current==null||current.isEmpty())current=getSharedPreferences("reader-local",MODE_PRIVATE).getString(ReaderPreferences.lastProfileKey(),"local");
         return profile.equals(current);
     }
     @Override protected void onResume(){

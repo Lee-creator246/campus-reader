@@ -72,7 +72,7 @@ public final class ReaderSettingsActivity extends Activity {
         action(storage,"下载文件管理","查看、导出或清理图片与附件",()->MediaActions.viewDownloads(this),false);
 
         LinearLayout about=category();section(about,"校园阅读");
-        note(about,"校园阅读 · 0.4.2-campus\n信息门户与本地阅读管理。");
+        note(about,"校园阅读 · 0.5.0-campus\n信息门户与本地阅读管理。");
         note(about,"通知缓存、已读、稍后读和标签保存在本机。校园连接和信息门户登录可从侧边栏进入。");
         showCategories();
         worker.execute(()->{

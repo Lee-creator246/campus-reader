@@ -16,14 +16,14 @@ public final class RefreshJobService extends JobService {
     private static final class Run {final JobParameters params;final AtomicBoolean stopped=new AtomicBoolean();Future<?> future;Run(JobParameters p){params=p;}}
     @Override public boolean onStartJob(JobParameters params){
         ReaderPreferences prefs=new ReaderPreferences(this);
-        if(!prefs.isBackgroundEnabled()||active!=null)return false;
+        if(!org.campusreader.auth.CampusConfiguration.isConfigured()||!prefs.isBackgroundEnabled()||active!=null)return false;
         // A query only: never restore, log in, start a tunnel, or request an OTP here.
         CampusApplication.auth().synchronizeSdkState();
         Run run=new Run(params);active=run;
         run.future=worker.submit(()->{
             try {
                 String profile=CampusSyncEngine.currentProfile();
-                if(profile.isEmpty())profile=getSharedPreferences("reader-local",MODE_PRIVATE).getString("lastProfile","");
+                if(profile.isEmpty())profile=getSharedPreferences("reader-local",MODE_PRIVATE).getString(ReaderPreferences.lastProfileKey(),"");
                 final String requestedProfile=profile;
                 boolean skipNetwork=prefs.isWifiOnly()&&!RefreshScheduler.wifiConnected(this);
                 CampusSyncEngine.Result result=CampusSyncEngine.syncPage(this,requestedProfile,null,true,

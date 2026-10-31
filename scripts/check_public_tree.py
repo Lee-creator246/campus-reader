@@ -2,7 +2,7 @@
 from pathlib import Path
 import os,re,subprocess,sys,hashlib
 ROOT=Path(__file__).resolve().parents[1]
-ROOT_FILES={'settings.gradle','build.gradle','gradle.properties','gradlew','gradlew.bat','LICENSE','README.md','BUILDING.md','THIRD_PARTY_NOTICES.md','CONTRIBUTING.md','SECURITY.md','CHANGELOG.md','.gitignore','.gitattributes','.editorconfig','SOURCE_MANIFEST.json','campus.example.properties'}
+ROOT_FILES={'settings.gradle','build.gradle','gradle.properties','gradlew','gradlew.bat','LICENSE','README.md','BUILDING.md','THIRD_PARTY_NOTICES.md','CONTRIBUTING.md','SECURITY.md','CHANGELOG.md','.gitignore','.gitattributes','.editorconfig','SOURCE_MANIFEST.json'}
 DIRS={'campus-config','app','campus-auth','campus-extension','campus-portal','checks','gradle','docs','scripts','licenses','vendor','.github'}
 GENERATED={'build','.gradle','.git','dist','__pycache__'}
 WRAPPER='gradle/wrapper/gradle-wrapper.jar'

@@ -10,8 +10,8 @@ android {
         // Initial vendor-SDK proof build follows the supplied Demo's target.
         // Raising targetSdk requires validating the vendor native tunnel lifecycle.
         targetSdk 30
-        versionCode 7
-        versionName '0.4.2-campus'
+        versionCode 8
+        versionName '0.5.0-campus'
         ndk { abiFilters 'arm64-v8a' }
     }
     buildTypes {
@@ -49,22 +49,3 @@ dependencies {
 }
 
 tasks.named('preBuild').configure { dependsOn rootProject.tasks.named('validateVendorSdk') }
-def generatedSiteRes = layout.buildDirectory.dir('generated/site/res')
-android.sourceSets.main.res.srcDir generatedSiteRes
-tasks.register('generateSiteNetworkSecurity') {
-    inputs.property('portalHost', rootProject.ext.campusSite.portalHost)
-    outputs.dir(generatedSiteRes)
-    doLast {
-        def output = generatedSiteRes.get().file('xml/network_security_config.xml').asFile
-        output.parentFile.mkdirs()
-        output.text = """<?xml version="1.0" encoding="utf-8"?>
-<network-security-config>
-    <base-config cleartextTrafficPermitted="false" />
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">${rootProject.ext.campusSite.portalHost}</domain>
-    </domain-config>
-</network-security-config>
-"""
-    }
-}
-tasks.named('preBuild').configure { dependsOn tasks.named('generateSiteNetworkSecurity') }
