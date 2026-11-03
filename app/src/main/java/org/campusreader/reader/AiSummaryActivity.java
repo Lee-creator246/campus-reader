@@ -43,6 +43,8 @@ public final class AiSummaryActivity extends Activity {
     private Future<?> task;
     private AlertDialog openEvidenceDialog,openConfirmation;
     private boolean sourceCheckPending;
+    private boolean interruptedByLeaving;
+    static final String LEAVING_NOTICE="上次生成因离开摘要页或锁屏已取消，未自动重试；服务方仍可能计费。已有缓存仍可查看。重新生成时请保持本页前台。";
     private long lastSourceCheck;
     private final Runnable monitor=new Runnable(){@Override public void run(){
         if(isDestroyed()||isFinishing())return;
@@ -64,6 +66,7 @@ public final class AiSummaryActivity extends Activity {
 
     @Override public void onCreate(Bundle state){
         super.onCreate(state);getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        interruptedByLeaving=state!=null&&state.getBoolean("ai_interrupted",false);
         profile=getIntent().getStringExtra(EXTRA_PROFILE);
         if(!AiProfile.owns(this,profile)){finish();return;}
         try{key=CampusNoticeStore.summaryKey(getIntent().getStringExtra(EXTRA_SOURCE),getIntent().getStringExtra(EXTRA_STABLE_ID));}
@@ -82,12 +85,13 @@ public final class AiSummaryActivity extends Activity {
         button(page,"AI 服务设置",()->openSettings(AiSettingsActivity.class));
         results=new LinearLayout(this);results.setOrientation(LinearLayout.VERTICAL);page.addView(results);
     }
-    private void openSettings(Class<? extends Activity> activity){cancelActive(false);startActivity(new Intent(this,activity).putExtra("profile",profile));}
+    private void openSettings(Class<? extends Activity> activity){if(busy)interruptedByLeaving=true;cancelActive(false);startActivity(new Intent(this,activity).putExtra("profile",profile));}
     @Override protected void onResume(){
         super.onResume();if(settings==null)return;if(!AiProfile.owns(this,profile)){finish();return;}
         main.removeCallbacks(monitor);main.post(monitor);reload();
     }
-    @Override protected void onStop(){dismissSourceDialogs();cancelActive(false);main.removeCallbacks(monitor);super.onStop();}
+    @Override protected void onSaveInstanceState(Bundle state){state.putBoolean("ai_interrupted",busy||interruptedByLeaving);super.onSaveInstanceState(state);}
+    @Override protected void onStop(){if(busy)interruptedByLeaving=true;dismissSourceDialogs();cancelActive(false);main.removeCallbacks(monitor);super.onStop();}
     @Override protected void onDestroy(){cancelActive(false);main.removeCallbacksAndMessages(null);worker.shutdownNow();super.onDestroy();}
 
     private void reload(){
@@ -116,6 +120,7 @@ public final class AiSummaryActivity extends Activity {
                     generate.setEnabled(service.enabled);generate.setText(result==null?"生成摘要":"重新生成（需要再次确认）");
                     status.setText(service.enabled?(result==null?"点击生成后，先核对将要发送的完整资料。":"显示已缓存摘要；尚未重新请求。")
                             :"AI 生成已关闭；可在服务设置启用。已有缓存仍可查看。");
+                    if(interruptedByLeaving){status.setText(LEAVING_NOTICE);interruptedByLeaving=false;}
                     if(result!=null)showResult(result,cached.generatedAtMillis,loaded,context);
                 });
             }catch(Exception failure){main.post(()->{if(active(token)){
@@ -156,7 +161,7 @@ public final class AiSummaryActivity extends Activity {
         if(busy||!AiProfile.owns(this,profile)||!settings.isCurrent(service)||!library.isCurrent(context.libraryRevision)){
             status.setText("账号、政策或设置已变化，请重新确认。");return;
         }
-        final long token=++sequence;config=service;busy=true;generate.setEnabled(false);cancel.setEnabled(true);status.setText("正在提取；可取消。不会自动重试。");
+        final long token=++sequence;config=service;busy=true;interruptedByLeaving=false;generate.setEnabled(false);cancel.setEnabled(true);status.setText("正在提取；请保持本页前台，离开或锁屏会取消。不会自动重试。");
         final AiTransport.Cancellation stop=new AiTransport.Cancellation();cancellation=stop;
         task=worker.submit(()->{
             try{

@@ -45,7 +45,13 @@ public final class AiSettings {
     }}
     public String endpoint(){return prefs.getString("endpoint","");}
     public String model(){return prefs.getString("model","");}
-    public AiProvider provider(){return AiProvider.fromId(prefs.getString("provider",AiProvider.CUSTOM.id));}
+    public AiProvider provider(){synchronized(LOCK){
+        // Versions before provider selection stored only the endpoint. Infer the official adapter
+        // without modifying credentials or contacting a server. Explicit CUSTOM always wins.
+        if(prefs.contains("provider"))return AiProvider.fromId(prefs.getString("provider",AiProvider.CUSTOM.id));
+        try{AiProvider.DEEPSEEK.endpoint(prefs.getString("endpoint",""));return AiProvider.DEEPSEEK;}
+        catch(IllegalArgumentException unsupported){return AiProvider.CUSTOM;}
+    }}
     public boolean enabled(){return prefs.getBoolean("enabled",false);}
     public boolean hasKey(){return prefs.contains("encrypted_key");}
     public void save(boolean enabled,String endpoint,String model,String newKey){save(enabled,endpoint,model,newKey,provider());}

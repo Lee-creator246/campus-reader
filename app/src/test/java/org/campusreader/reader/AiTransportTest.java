@@ -114,6 +114,37 @@ public class AiTransportTest {
     }
     @Test public void reasoningWithoutFinalContentIsNeverAccepted()throws Exception{
         String response=new JSONObject().put("choices",new JSONArray().put(new JSONObject().put("finish_reason","stop").put("message",new JSONObject().put("reasoning_content","{\"evidence\":[]}").put("content",JSONObject.NULL)))).toString();
-        try{AiTransport.requestJson(config(),"Return JSON",SOURCE,new AiTransport.Cancellation(),()->{},request->new FakeCall(request,200,response));fail();}catch(JSONException expected){}
+        try{AiTransport.requestJson(config(),"Return JSON",SOURCE,new AiTransport.Cancellation(),()->{},request->new FakeCall(request,200,response));fail();}
+        catch(AiTransport.ResponseException expected){assertEquals(AiTransport.ResponseFailureCode.NO_FINAL_OUTPUT,expected.code);}
+    }
+    @Test public void successfulHttpCanHaveTypedUnusableOutputWithoutRetryOrRawDetails()throws Exception{
+        Object[][] cases={
+                {"length","{\"valid_looking\":true}","",AiTransport.ResponseFailureCode.OUTPUT_LIMIT},
+                {"content_filter","synthetic-private-content","",AiTransport.ResponseFailureCode.CONTENT_FILTER},
+                {"aborted","{}","",AiTransport.ResponseFailureCode.INCOMPLETE},
+                {"synthetic-private-content","{}","",AiTransport.ResponseFailureCode.INCOMPLETE},
+                {"stop"," \n\t ","",AiTransport.ResponseFailureCode.EMPTY_OUTPUT},
+                {"stop",JSONObject.NULL,"synthetic-private-content",AiTransport.ResponseFailureCode.NO_FINAL_OUTPUT},
+                {"stop"," ","synthetic-private-content",AiTransport.ResponseFailureCode.NO_FINAL_OUTPUT}
+        };
+        for(Object[] entry:cases){
+            JSONObject message=new JSONObject().put("content",entry[1]).put("reasoning_content",entry[2]);
+            String response=new JSONObject().put("choices",new JSONArray().put(new JSONObject().put("finish_reason",entry[0]).put("message",message))).toString();
+            AtomicInteger attempts=new AtomicInteger();
+            try{AiTransport.requestJson(config(),"Return JSON",SOURCE,new AiTransport.Cancellation(),()->{},request->{attempts.incrementAndGet();return new FakeCall(request,200,response);});fail();}
+            catch(AiTransport.ResponseException expected){
+                assertEquals(entry[3],expected.code);assertEquals(((AiTransport.ResponseFailureCode)entry[3]).name(),expected.getMessage());
+                String feedback=AiTransport.failureMessage(expected);assertFalse(feedback.contains("synthetic-private-content"));assertFalse(feedback.contains("test-api-key"));
+                assertTrue(feedback.contains("未保存")||feedback.contains("没有保存")||feedback.contains("没有生成或保存"));
+            }
+            assertEquals(1,attempts.get());
+        }
+    }
+    @Test public void absentNullAndWhitespaceFinalWithoutReasoningAreEmptyNotSuccess()throws Exception{
+        for(JSONObject message:new JSONObject[]{new JSONObject(),new JSONObject().put("content",JSONObject.NULL),new JSONObject().put("content"," \r\n").put("reasoning_content","  ")}){
+            String response=new JSONObject().put("choices",new JSONArray().put(new JSONObject().put("finish_reason","stop").put("message",message))).toString();
+            try{AiTransport.requestJson(config(),"Return JSON",SOURCE,new AiTransport.Cancellation(),()->{},request->new FakeCall(request,200,response));fail();}
+            catch(AiTransport.ResponseException expected){assertEquals(AiTransport.ResponseFailureCode.EMPTY_OUTPUT,expected.code);assertTrue(AiTransport.failureMessage(expected).contains("空白"));}
+        }
     }
 }

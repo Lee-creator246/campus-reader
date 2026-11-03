@@ -35,6 +35,12 @@ public final class AiTransport {
                 // Stop these statuses before its follow-up handler; this feature never retries.
                 if(response.code()==408||response.code()==503){int code=response.code();response.close();throw new IOException("HTTP_"+code);}return response;}).build();
     public interface Guard{void check()throws IOException;}
+    /** Fixed failure codes only; never retain model text or provider error messages. */
+    public enum ResponseFailureCode { OUTPUT_LIMIT, EMPTY_OUTPUT, NO_FINAL_OUTPUT, CONTENT_FILTER, INCOMPLETE }
+    public static final class ResponseException extends IOException {
+        public final ResponseFailureCode code;
+        private ResponseException(ResponseFailureCode code){super(code.name());this.code=code;}
+    }
     public static final class Cancellation {
         private volatile boolean cancelled;
         private volatile Call call;
@@ -73,7 +79,7 @@ public final class AiTransport {
             try(Response response=call.execute()){
             int status=response.code();guard.check();cancellation.check();
             if(status!=200)throw new IOException(status>=300&&status<400?"REDIRECT":"HTTP_"+status);
-            ResponseBody responseBody=response.body();if(responseBody==null)throw new IOException("INCOMPLETE");
+            ResponseBody responseBody=response.body();if(responseBody==null)throw new ResponseException(ResponseFailureCode.INCOMPLETE);
             if(responseBody.contentLength()>AiPolicy.MAX_RESPONSE_BYTES)throw new IOException("RESPONSE_LIMIT");
             ByteArrayOutputStream bytes=new ByteArrayOutputStream();try(InputStream input=responseBody.byteStream()){
                 byte[] buffer=new byte[2048];int count;
@@ -83,10 +89,18 @@ public final class AiTransport {
             String body=StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes.toByteArray())).toString();
             boundedJson(body);
             JSONObject choice=new JSONObject(body).getJSONArray("choices").getJSONObject(0);
-            if(!"stop".equals(choice.optString("finish_reason")))throw new IOException("INCOMPLETE");
-            Object content=choice.getJSONObject("message").get("content");if(!(content instanceof String))throw new JSONException("No text response");
+            String finish=choice.optString("finish_reason");
+            if("length".equals(finish))throw new ResponseException(ResponseFailureCode.OUTPUT_LIMIT);
+            if("content_filter".equals(finish))throw new ResponseException(ResponseFailureCode.CONTENT_FILTER);
+            if(!"stop".equals(finish))throw new ResponseException(ResponseFailureCode.INCOMPLETE);
+            JSONObject message=choice.getJSONObject("message");Object content=message.opt("content");
+            if(content==null||content==JSONObject.NULL||(content instanceof String&&((String)content).trim().isEmpty())){
+                Object reasoning=message.opt("reasoning_content");
+                boolean hasReasoning=reasoning instanceof String&&!((String)reasoning).trim().isEmpty();
+                throw new ResponseException(hasReasoning?ResponseFailureCode.NO_FINAL_OUTPUT:ResponseFailureCode.EMPTY_OUTPUT);
+            }
+            if(!(content instanceof String))throw new JSONException("No text response");
             String json=((String)content).trim();
-            if(json.isEmpty())throw new IOException("INCOMPLETE");
             if(json.getBytes(StandardCharsets.UTF_8).length>AiPolicy.MAX_RESULT_BYTES)throw new IOException("RESPONSE_LIMIT");
             boundedJson(json);
             JSONTokener tokener=new JSONTokener(json);if(!(tokener.nextValue() instanceof JSONObject)||tokener.nextClean()!=0)throw new JSONException("Expected one JSON object");
@@ -129,7 +143,13 @@ public final class AiTransport {
         if("STALE".equals(code))return "账号、正文或 AI 设置已变化，本次结果未显示或保存。";
         if("QUOTA".equals(code))return "今日已达 20 次本机尝试上限，或设置已变化；没有再次请求。";
         if("SOURCE_LIMIT".equals(code))return "本次资料超过发送上限，请减少政策材料或直接阅读原文；没有发送请求。";
-        if(failure instanceof JSONException||"INCOMPLETE".equals(code)||"RESPONSE_LIMIT".equals(code))return "服务返回的摘要不完整、格式不受支持或过长，本次结果未保存。";
+        if("OUTPUT_LIMIT".equals(code))return "服务已接收请求，但模型达到输出上限，未返回完整摘要。请使用非思考模式或较短通知后手动重试；本次结果未保存，服务方仍可能计费。";
+        if("NO_FINAL_OUTPUT".equals(code))return "服务返回了思考过程，但没有最终摘要。请在设置选择 DeepSeek 预设（关闭思考）或支持最终 JSON 输出的模型；没有保存结果，也没有自动重试。";
+        if("EMPTY_OUTPUT".equals(code))return "服务返回了空白结果，没有可显示的摘要。本次未保存，请核对模型的 JSON 输出支持后手动重试；没有自动重试。";
+        if("CONTENT_FILTER".equals(code))return "服务的内容过滤阻止了本次输出，没有生成或保存摘要。请核对所选服务的使用规则；没有自动重试。";
+        if("INCOMPLETE".equals(code))return "服务未完成最终输出，本次结果未保存。API 请求成功不代表摘要生成完成；请稍后手动重试。";
+        if("RESPONSE_LIMIT".equals(code))return "服务响应超过本机读取上限，本次结果未保存；请使用较短通知后手动重试，没有自动重试。";
+        if(failure instanceof JSONException)return "服务返回的摘要格式不受支持，无法显示；本次结果未保存。请核对模型是否支持要求的 JSON 输出，没有自动重试。";
         return "摘要未能生成，请核对网络、服务地址与模型支持后手动重试。没有自动重试；费用以服务方记录为准。";
     }
 }

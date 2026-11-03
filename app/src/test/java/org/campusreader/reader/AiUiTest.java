@@ -171,6 +171,17 @@ public class AiUiTest {
         assertNoAttemptOrCampusConnection();
     }
 
+    @Test public void leavingDuringGenerationExplainsCancellationWithoutRetryOrStateLoss()throws Exception{
+        seedCachedSummary(false);AiSummaryActivity activity=openSummary();AiTransport.Cancellation cancel=new AiTransport.Cancellation();
+        ReflectionHelpers.setField(activity,"busy",true);ReflectionHelpers.setField(activity,"cancellation",cancel);
+        controller.pause().stop();
+        try{cancel.check();fail("Leaving must cancel the in-flight call");}catch(java.io.IOException expected){assertEquals("CANCELLED",expected.getMessage());}
+        controller.start().resume();awaitTask(activity);
+        assertNotNull(findText(activity,AiSummaryActivity.LEAVING_NOTICE));assertNotNull(findText(activity,"报名志愿活动，11月5日截止。"));
+        try(CampusNoticeStore store=new CampusNoticeStore(app,"local")){assertFalse(store.find(key).read);assertTrue(store.find(key).later);assertEquals(1,store.tags(key).size());assertEquals(1,store.summaryCount());}
+        assertNoAttemptOrCampusConnection();
+    }
+
     private CampusNotice notice(String body){return new CampusNotice(key,"合成测试通知",10,body,
             "https://portal.example.org/synthetic/notice-1",Collections.emptyList(),Collections.emptyList());}
     private void seedCachedSummary(boolean policy)throws Exception{

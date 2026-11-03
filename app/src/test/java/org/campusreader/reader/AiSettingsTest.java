@@ -35,9 +35,34 @@ public class AiSettingsTest {
         AiSettings.Config saved=settings.load();assertFalse(saved.enabled);assertFalse(settings.hasKey());assertEquals(AiProvider.DEEPSEEK,saved.provider);
         assertEquals(AiProvider.DEEPSEEK.defaultModel,saved.model);assertEquals(0,settings.usedToday());
     }
-    @Test public void oldSettingsMigrateToCustomWithoutSecretOrNetworkChanges(){
+    @Test public void oldNonOfficialSettingsRemainCustomWithoutSecretOrNetworkChanges(){
         prefs.edit().putString("endpoint","https://models.example.org/v1/chat/completions").putString("model","my-model").commit();
         assertEquals(AiProvider.CUSTOM,settings.provider());assertEquals("my-model",settings.load().model);assertFalse(prefs.contains("provider"));
+    }
+    @Test public void legacyOfficialEndpointsInferDeepSeekWithoutChangingStoredAccountData(){
+        for(String endpoint:new String[]{"https://api.deepseek.com/chat/completions","https://api.deepseek.com/v1/chat/completions","https://api.deepseek.com:443/v1/chat/completions"}){
+            prefs.edit().clear().putBoolean("enabled",false).putString("endpoint",endpoint).putString("model","deepseek-flash")
+                    .putString("encrypted_key","synthetic-ciphertext").putString("key_iv","synthetic-iv").putLong("revision",17).putInt("request_count",4).commit();
+            java.util.Map<String,?> original=new java.util.HashMap<>(prefs.getAll());
+            AiSettings.Config migrated=settings.load();assertEquals(AiProvider.DEEPSEEK,migrated.provider);assertEquals(endpoint,migrated.endpoint);assertEquals("deepseek-flash",migrated.model);
+            assertEquals(17,migrated.revision);assertFalse(migrated.enabled);assertEquals(original,prefs.getAll());assertFalse(prefs.contains("provider"));
+            assertNotEquals(new AiSettings.Config(false,endpoint,"deepseek-flash","",17,AiProvider.CUSTOM).configHash,migrated.configHash);
+        }
+    }
+    @Test public void explicitCustomSelectionOnOfficialEndpointIsPreserved(){
+        prefs.edit().putString("provider",AiProvider.CUSTOM.id).putString("endpoint",AiProvider.DEEPSEEK.defaultEndpoint).putString("model","deepseek-flash").commit();
+        assertEquals(AiProvider.CUSTOM,settings.provider());assertEquals(AiProvider.CUSTOM,settings.load().provider);
+    }
+    @Test public void legacyOfficialHostLookalikesAndUnsafeUrlsNeverInferDeepSeek(){
+        for(String endpoint:new String[]{"http://api.deepseek.com/chat/completions","https://api.deepseek.com.evil.example/chat/completions", "https://api.deepseek.com:8443/chat/completions",
+                "https://api.deepseek.com/proxy/chat/completions","https://api.deepseek.com/v1/../chat/completions","https://api.deepseek.com/chat/completions?key=synthetic", "https://user@api.deepseek.com/chat/completions", "https://models.example.org/v1/chat/completions", ""}){
+            prefs.edit().clear().putString("endpoint",endpoint).commit();assertEquals(endpoint,AiProvider.CUSTOM,settings.provider());assertFalse(prefs.contains("provider"));
+        }
+    }
+    @Test public void unknownExplicitProviderDoesNotSilentlyMigrate(){
+        prefs.edit().putString("provider","unknown-provider").putString("endpoint",AiProvider.DEEPSEEK.defaultEndpoint).commit();
+        try{settings.provider();fail();}catch(IllegalArgumentException expected){}
+        assertEquals("unknown-provider",prefs.getString("provider",""));
     }
     @Test public void selectingDeepSeekCannotCarryPreviousDestinationKey(){
         prefs.edit().putString("endpoint","https://models.example.org/v1/chat/completions").putString("encrypted_key","synthetic-ciphertext").putString("key_iv","synthetic-iv").commit();
