@@ -59,7 +59,7 @@ public final class CampusAuthActivity extends Activity implements CampusAuthCont
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         LinearLayout page=column();page.setPadding(dp(20),dp(24),dp(20),dp(24));scroll.addView(page);
         TextView school=text("校园访问",22,INK);school.setTypeface(Typeface.DEFAULT,Typeface.BOLD);page.addView(school);
-        TextView explanation=text("先用校园账号和动态密码建立访问通道，再返回阅读页单独登录信息门户。门户账号密码不会交给校园连接界面。",14,MUTED);explanation.setLineSpacing(dp(3),1);add(page,explanation,8);
+        TextView explanation=text("第 1 步：用校园账号和动态密码建立访问通道。\n第 2 步：返回阅读页检查或单独登录信息门户。两步都就绪后才能同步，门户密码不会交给校园连接界面。",14,MUTED);explanation.setLineSpacing(dp(3),1);add(page,explanation,8);
 
         LinearLayout form=card();add(page,form,24);
         account=new EditText(this);account.setId(View.generateViewId());account.setHint("请输入学工号");account.setSingleLine(true);account.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);styleInput(account);
@@ -73,7 +73,7 @@ public final class CampusAuthActivity extends Activity implements CampusAuthCont
 
         LinearLayout stateCard=card();add(page,stateCard,16);
         LinearLayout stateHeading=new LinearLayout(this);stateHeading.setOrientation(LinearLayout.HORIZONTAL);stateHeading.setGravity(Gravity.CENTER_VERTICAL);
-        TextView stateTitle=text("连接状态",15,INK);stateTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);stateHeading.addView(stateTitle,new LinearLayout.LayoutParams(0,-2,1));
+        TextView stateTitle=text("校园通道状态",15,INK);stateTitle.setTypeface(Typeface.DEFAULT,Typeface.BOLD);stateHeading.addView(stateTitle,new LinearLayout.LayoutParams(0,-2,1));
         stateBadge=text("未连接",12,BLUE);stateBadge.setPadding(dp(10),dp(4),dp(10),dp(4));stateBadge.setBackground(shape(0xffedf3ff,0,20));stateHeading.addView(stateBadge);stateCard.addView(stateHeading);
         status=text("尚未连接校园网",14,MUTED);status.setTextIsSelectable(true);status.setLineSpacing(dp(3),1);status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);add(stateCard,status,10);
         TextView server=text("使用本地配置的校园访问入口",12,MUTED);add(stateCard,server,12);
@@ -105,7 +105,8 @@ public final class CampusAuthActivity extends Activity implements CampusAuthCont
         }else finish();
     }
     @Override public void onState(CampusAuthController.State state,long code,String message){
-        status.setText(message+(code==0?"":"\n错误码："+code));
+        CampusConnectionStatus snapshot=auth.connectionStatus(CampusConnectionStatus.PortalState.UNKNOWN);
+        status.setText(message+"\n"+snapshot.detail+(code==0?"":"\n错误码："+code));
         boolean busy=state==CampusAuthController.State.RESTORING||state==CampusAuthController.State.AUTHENTICATING||state==CampusAuthController.State.CHALLENGE_REQUIRED||state==CampusAuthController.State.STARTING_TUNNEL;
         boolean ready=state==CampusAuthController.State.ACCESS_READY;
         login.setEnabled(!busy&&!ready);account.setEnabled(!busy&&!ready);password.setEnabled(!busy&&!ready);
@@ -115,7 +116,7 @@ public final class CampusAuthActivity extends Activity implements CampusAuthCont
         // Returning to cached reading never requires successful network authentication.
         returnToReader.setEnabled(true);
         String badge;
-        switch(state){case RESTORING:badge="恢复中";break;case AUTHENTICATING:badge="认证中";break;case CHALLENGE_REQUIRED:badge="待验证";break;case STARTING_TUNNEL:badge="连接中";break;case ACCESS_READY:badge="已连接";break;default:badge="未连接";}
+        switch(state){case RESTORING:badge="恢复中";break;case AUTHENTICATING:badge="认证中";break;case CHALLENGE_REQUIRED:badge="待验证";break;case STARTING_TUNNEL:badge="连接中";break;case ACCESS_READY:badge="通道已连接";break;default:badge="未连接";}
         stateBadge.setText(badge);
         if(state!=CampusAuthController.State.CHALLENGE_REQUIRED){challengeBox.removeAllViews();challengeBox.setVisibility(View.GONE);}
         if(ready&&autoReturnAfterConnect)finishConnected();

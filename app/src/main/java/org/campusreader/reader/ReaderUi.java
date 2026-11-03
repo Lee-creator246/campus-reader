@@ -40,6 +40,7 @@ public final class ReaderUi {
             switch(name){
                 case "menu":line(c,4,6,20,6);line(c,4,12,20,12);line(c,4,18,20,18);break;
                 case "search":c.drawCircle(10,10,6,p);line(c,14.5f,14.5f,21,21);break;
+                case "summary":line(c,4,5,14,5);line(c,4,10,12,10);line(c,4,15,10,15);line(c,16,10,17.5f,14.5f,22,16,17.5f,17.5f,16,22,14.5f,17.5f,10,16,14.5f,14.5f,16,10);break;
                 case "check":case "read":case "article_read":line(c,4,12,9,17,20,6);break;
                 case "unread":case "article_unread":c.drawCircle(12,12,8,p);c.drawCircle(12,12,2,p);break;
                 case "star":case "article_star":bookmark(c,false);break;

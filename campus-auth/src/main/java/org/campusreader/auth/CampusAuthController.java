@@ -98,6 +98,15 @@ public final class CampusAuthController implements SFAuthResultListener, SFTunne
     public boolean isRestartRequired() { return CampusConfiguration.requiresRestart(); }
     public String getProfileId() { return profileId; }
     public boolean isPortalAuthenticationRequired() { return portalAuthenticationRequired; }
+    /** UI-only snapshot; never restores a session or infers successful portal login. */
+    public CampusConnectionStatus connectionStatus(CampusConnectionStatus.PortalState portal) {
+        if (portalAuthenticationRequired && portal != CampusConnectionStatus.PortalState.CHECKING
+                && portal != CampusConnectionStatus.PortalState.WAITING)
+            portal = CampusConnectionStatus.PortalState.LOGIN_REQUIRED;
+        String observedState = state == State.ACCESS_READY && !isAccessReady() ? State.DISCONNECTED.name() : state.name();
+        return CampusConnectionStatus.describe(CampusConfiguration.isConfigured(),
+                CampusConfiguration.requiresRestart(), observedState, portal);
+    }
     /** Sanitized enum/boolean/numeric diagnostics only; contains no account, ticket or password. */
     public String getDiagnostics() { return diagnostics; }
 

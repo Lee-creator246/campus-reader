@@ -24,7 +24,7 @@ public final class KeywordRulesActivity extends Activity {
     public static final String EXTRA_PROFILE="profile";
     private String profile;
     private TextView saveButton,error;
-    private Button retry;
+    private Button retry,reset;
     private Switch blockedToggle,priorityToggle;
     private EditText blockedInput,priorityInput;
     private boolean loaded,saving;
@@ -52,6 +52,9 @@ public final class KeywordRulesActivity extends Activity {
         note(page,"分别设置不想看到的内容和需要优先关注的内容，规则仅用于当前账号。",14);
         error=ReaderUi.text(this,"",13,0xffb3261e);error.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);error.setVisibility(View.GONE);page.addView(error);
         retry=action("重新读取规则",()->load(null));retry.setVisibility(View.GONE);page.addView(retry,new LinearLayout.LayoutParams(-1,dp(48)));
+        reset=action("重置无法读取的规则",()->new AlertDialog.Builder(this).setTitle("重置关键词规则？").setMessage("当前账号的屏蔽词、优先提醒词和上一版规则将移除。通知缓存、已读、稍后读和标签保留。也可先尝试下方的撤销上一次保存。")
+                .setNegativeButton("取消",null).setPositiveButton("重置规则",(d,w)->{if(!ownsProfile()){finish();return;}if(KeywordRules.reset(this,profile)){load(null);setResult(RESULT_OK);}else Toast.makeText(this,"重置失败，请重试",Toast.LENGTH_LONG).show();}).show());
+        reset.setVisibility(View.GONE);page.addView(reset,new LinearLayout.LayoutParams(-1,dp(48)));
 
         blockedToggle=toggle(page,"启用屏蔽词");
         note(page,"命中任一屏蔽词的通知，将从列表和新通知提醒中隐藏。",13);
@@ -69,6 +72,11 @@ public final class KeywordRulesActivity extends Activity {
         note(page,"• 按字词匹配标题和仍缓存的正文；正文已清理时，只能匹配标题。图片内文字不参与匹配。\n• 同时命中两类词时，屏蔽规则优先。\n• 屏蔽不删除缓存，也不改变已读、稍后读或标签。关闭屏蔽后可重新看到内容。\n• 后台按刷新设置检查新通知，不是实时推送。提醒声音及弹出方式由系统通知渠道控制。",13);
         Button notifications=action("通知权限与渠道",()->{if(!SettingsSupport.openNotifications(this))Toast.makeText(this,"暂时无法打开系统通知设置",Toast.LENGTH_SHORT).show();});
         page.addView(notifications,new LinearLayout.LayoutParams(-1,dp(48)));
+        divider(page);
+        page.addView(action("预览当前草稿的效果",()->preview(false)),new LinearLayout.LayoutParams(-1,dp(48)));
+        page.addView(action("查看已被屏蔽的内容",()->preview(true)),new LinearLayout.LayoutParams(-1,dp(48)));
+        page.addView(action("撤销上一次保存",this::undo),new LinearLayout.LayoutParams(-1,dp(48)));
+        note(page,"预览只检查本机已有内容，不保存规则、不改变阅读状态。撤销恢复上一版已保存规则，不重新提醒历史通知。",12);
         blockedToggle.setOnCheckedChangeListener((button,value)->updateEnabled());
         priorityToggle.setOnCheckedChangeListener((button,value)->updateEnabled());
         load(state);
@@ -91,7 +99,7 @@ public final class KeywordRulesActivity extends Activity {
         if(!ownsProfile()){finish();return;}
         loaded=false;updateEnabled();
         try{
-            KeywordRules rules=KeywordRules.load(this,profile);
+            KeywordRules rules=KeywordRules.loadStrict(this,profile);
             originalBlocked=rules.blockedEnabled;originalPriority=rules.priorityEnabled;
             originalBlockedText=TextUtils.join("\n",rules.blockedWords);originalPriorityText=TextUtils.join("\n",rules.priorityWords);
             blockedToggle.setChecked(originalBlocked);priorityToggle.setChecked(originalPriority);
@@ -102,9 +110,9 @@ public final class KeywordRulesActivity extends Activity {
                 blockedInput.setText(state.getString("blocked_text",originalBlockedText));
                 priorityInput.setText(state.getString("priority_text",originalPriorityText));
             }
-            loaded=true;error.setVisibility(View.GONE);retry.setVisibility(View.GONE);
+            loaded=true;error.setVisibility(View.GONE);retry.setVisibility(View.GONE);reset.setVisibility(View.GONE);
         }catch(RuntimeException failure){
-            error.setText("未能读取已保存的规则。请重试，当前内容不会覆盖已有规则。");error.setVisibility(View.VISIBLE);retry.setVisibility(View.VISIBLE);
+            error.setText("未能读取已保存的规则。请重试，当前内容不会覆盖已有规则。");error.setVisibility(View.VISIBLE);retry.setVisibility(View.VISIBLE);reset.setVisibility(View.VISIBLE);
         }
         updateEnabled();
     }
@@ -115,6 +123,31 @@ public final class KeywordRulesActivity extends Activity {
         if(priorityToggle!=null)priorityToggle.setEnabled(editable);
         if(blockedInput!=null){blockedInput.setEnabled(editable&&blockedToggle.isChecked());blockedInput.setAlpha(blockedToggle.isChecked()?1f:.6f);}
         if(priorityInput!=null){priorityInput.setEnabled(editable&&priorityToggle.isChecked());priorityInput.setAlpha(priorityToggle.isChecked()?1f:.6f);}
+    }
+    private KeywordRules draft(){
+        List<String> blocked=KeywordRules.parseWords(blockedInput.getText().toString()),priority=KeywordRules.parseWords(priorityInput.getText().toString());
+        if(blockedToggle.isChecked()&&blocked.isEmpty())throw new IllegalArgumentException("请填写屏蔽词，或关闭屏蔽开关");
+        if(priorityToggle.isChecked()&&priority.isEmpty())throw new IllegalArgumentException("请填写优先提醒词，或关闭优先提醒开关");
+        return new KeywordRules(blockedToggle.isChecked(),blocked,priorityToggle.isChecked(),priority);
+    }
+    private void preview(boolean saved){
+        if(!loaded||saving||!ownsProfile())return;
+        try{KeywordRules rules=saved?KeywordRules.loadStrict(this,profile):draft();
+            startActivity(new android.content.Intent(this,RulePreviewActivity.class).putExtra("profile",profile)
+                    .putExtra("rules",rules.fingerprint()).putExtra("blockedOnly",saved));
+        }catch(RuntimeException failure){Toast.makeText(this,failure instanceof IllegalArgumentException?failure.getMessage():"规则暂时无法读取，请重试",Toast.LENGTH_LONG).show();}
+    }
+    private void undo(){
+        if(saving||!ownsProfile())return;
+        try{KeywordRules old=KeywordRules.previous(this,profile);
+            if(old==null){Toast.makeText(this,"还没有可以恢复的上一版规则",Toast.LENGTH_SHORT).show();return;}
+            String summary="将恢复为：\n屏蔽："+(old.blockedEnabled?TextUtils.join("、",old.blockedWords):"已暂停")+"\n优先提醒："+(old.priorityEnabled?TextUtils.join("、",old.priorityWords):"已暂停")+"\n\n当前草稿将被替换，阅读状态和标签保留。";
+            new AlertDialog.Builder(this).setTitle("撤销上一次保存？").setMessage(summary).setNegativeButton("取消",null).setPositiveButton("恢复上一版",(d,w)->{
+                if(!ownsProfile()){finish();return;}
+                if(KeywordRules.undo(this,profile)){load(null);setResult(RESULT_OK);Toast.makeText(this,"已恢复上一版规则",Toast.LENGTH_SHORT).show();}
+                else Toast.makeText(this,"恢复失败，请重试",Toast.LENGTH_LONG).show();
+            }).show();
+        }catch(RuntimeException failed){Toast.makeText(this,"上一版规则无法读取；没有更改现有内容",Toast.LENGTH_LONG).show();}
     }
     private void save(){
         if(!loaded||saving)return;

@@ -22,7 +22,7 @@ public final class ReaderSettingsActivity extends Activity {
     private boolean policyLoaded,saving;
     private Spinner textSize;
     private final int[] zooms={90,100,110,125,140};
-    private final String[] categoryTitles={"界面","通知","离线与缓存","关于"};
+    private final String[] categoryTitles={"界面","通知","离线与缓存","AI 摘要","关于"};
     @Override public void onCreate(Bundle state){
         super.onCreate(state);prefs=new ReaderPreferences(this);profile=getIntent().getStringExtra("profile");if(profile==null){finish();return;}
         getWindow().setStatusBarColor(Color.WHITE);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
@@ -50,6 +50,7 @@ public final class ReaderSettingsActivity extends Activity {
         notifications=toggle(sync,"新通知提醒","有新内容时在通知栏提醒",prefs.isNotificationsEnabled());
         note(notificationsPage,"后台刷新由系统安排，可能受省电限制而延迟。登录过期时仅提醒，需返回 App 完成认证。修改后请点右上角“保存”。");
         section(notificationsPage,"系统权限");LinearLayout access=group(notificationsPage);
+        action(access,"刷新与提醒记录","查看为什么提醒或没有提醒",()->startActivity(new android.content.Intent(this,NotificationHistoryActivity.class).putExtra(NotificationHistoryActivity.EXTRA_PROFILE,profile)),false);
         action(access,"通知权限与通知渠道","管理系统允许的提醒方式",()->SettingsSupport.openNotifications(this),false);
         action(access,"发送测试通知","按已保存的提醒设置发送一条测试",()->Toast.makeText(this,ReaderNotifications.postTest(this)?"测试通知已发出，请查看通知栏":"通知未获允许或已关闭；请先保存设置并检查系统权限",Toast.LENGTH_LONG).show(),false);
         action(access,"电池与后台运行设置","查看系统对后台活动的限制",()->SettingsSupport.openBatterySettings(this),false);
@@ -72,7 +73,7 @@ public final class ReaderSettingsActivity extends Activity {
         action(storage,"下载文件管理","查看、导出或清理图片与附件",()->MediaActions.viewDownloads(this),false);
 
         LinearLayout about=category();section(about,"校园阅读");
-        note(about,"校园阅读 · 0.5.0-campus\n信息门户与本地阅读管理。");
+        note(about,"校园阅读 · 0.6.0-campus\n信息门户与本地阅读管理。");
         note(about,"通知缓存、已读、稍后读和标签保存在本机。校园连接和信息门户登录可从侧边栏进入。");
         showCategories();
         worker.execute(()->{
@@ -86,7 +87,7 @@ public final class ReaderSettingsActivity extends Activity {
     private LinearLayout category(){LinearLayout panel=column();panel.setBackgroundColor(Color.WHITE);categories.add(panel);return panel;}
     private void showCategories(){
         selectedCategory=-1;pageTitle.setText("设置");left.setVisibility(View.INVISIBLE);pageContainer.removeAllViews();
-        String[] icons={"settings_interface","settings_notifications","settings_miscellaneous","settings_about"};
+        String[] icons={"settings_interface","settings_notifications","settings_miscellaneous","summary","settings_about"};
         for(int i=0;i<categoryTitles.length;i++){
             final int selected=i;View row=getLayoutInflater().inflate(R.layout.reader_item_settings,pageContainer,false);
             ((TextView)row.findViewById(R.id.reader_main_text)).setText(categoryTitles[i]);
@@ -98,8 +99,8 @@ public final class ReaderSettingsActivity extends Activity {
         }
         updateDone();scrollToTop();
     }
-    private void showCategory(int index){selectedCategory=index;pageTitle.setText(categoryTitles[index]);left.setVisibility(View.VISIBLE);pageContainer.removeAllViews();pageContainer.addView(categories.get(index));updateDone();scrollToTop();}
-    private void updateDone(){boolean root=selectedCategory<0,about=selectedCategory==3;done.setText(root||about?"完成":saving?"保存中…":"保存");done.setEnabled(root||about||policyLoaded&&!saving);done.setAlpha(done.isEnabled()?1f:.4f);if(about)done.setOnClickListener(v->showCategories());else done.setOnClickListener(v->{if(selectedCategory<0)finish();else if(policyLoaded&&!saving)save();});}
+    private void showCategory(int index){if(index==3){startActivity(new android.content.Intent(this,AiSettingsActivity.class).putExtra(AiSettingsActivity.EXTRA_PROFILE,profile));return;}selectedCategory=index;pageTitle.setText(categoryTitles[index]);left.setVisibility(View.VISIBLE);pageContainer.removeAllViews();pageContainer.addView(categories.get(index==4?3:index));updateDone();scrollToTop();}
+    private void updateDone(){boolean root=selectedCategory<0,about=selectedCategory==4;done.setText(root||about?"完成":saving?"保存中…":"保存");done.setEnabled(root||about||policyLoaded&&!saving);done.setAlpha(done.isEnabled()?1f:.4f);if(about)done.setOnClickListener(v->showCategories());else done.setOnClickListener(v->{if(selectedCategory<0)finish();else if(policyLoaded&&!saving)save();});}
     private void scrollToTop(){View parent=(View)pageContainer.getParent();if(parent instanceof ScrollView)parent.post(()->((ScrollView)parent).scrollTo(0,0));}
     private void selectable(View view){android.util.TypedValue value=new android.util.TypedValue();getTheme().resolveAttribute(android.R.attr.selectableItemBackground,value,true);if(value.resourceId!=0)view.setBackgroundResource(value.resourceId);view.setFocusable(true);}
     private void save(){

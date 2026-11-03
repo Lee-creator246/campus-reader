@@ -30,6 +30,14 @@ Windows：`gradlew.bat :checks:verify`。测试使用生产 Java 实现和合成
 
 测试代码显式安装合成站点配置。生产代码启动时没有默认校园地址，不需要测试专用构建参数。
 
+Android 本地单元测试还覆盖规则存储、提醒决策、SQLite 摘要缓存和模拟网络响应，需要完整 Android 构建依赖及厂商 AAR 才能编译：
+
+```sh
+./gradlew :app:testDebugUnitTest -PsangforSdk=/absolute/path/SangforSDK.aar
+```
+
+这些测试使用 JUnit 4 和 Robolectric，不会登录校园网络或调用付费模型。Robolectric 模拟环境不能代替设备上的 WebView、AndroidKeyStore、厂商隧道和系统通知验证。本版实际运行结果以 [docs/VALIDATION.md](docs/VALIDATION.md) 为准。
+
 ## 安装后配置站点
 
 构建不读取校园地址。安装后打开“校园配置”，向学校确认自己有权使用的服务参数，再在 App 内填写：
@@ -42,6 +50,25 @@ Windows：`gradlew.bat :checks:verify`。测试使用生产 Java 实现和合成
 | 门户登录地址（可选） | 例如 `https://auth.campus.example.edu/login`；留空时使用通知列表地址作为登录入口 |
 
 这些示例仅说明格式，不对应可用服务，也不会自动填入 App。通知列表主机必须属于校园认证域或其子域，可使用 HTTP 或 HTTPS；登录页须使用校园域内的 HTTPS，或与门户同主机的 HTTP。网址仅允许协议对应的标准端口，不得含内嵌账号密码或登录票据；登录入口可保留页面路由所需的片段，VPN 和通知列表地址不可含片段。
+
+### 导入配置文件或粘贴配置
+
+配置页面支持从文件选择器读取 UTF-8 JSON，也可粘贴同样格式的文本。下面是完整的合成示例：
+
+```json
+{
+  "format": "campus-reader-site",
+  "version": 1,
+  "domain": "campus.example.edu",
+  "vpnUrl": "https://vpn.campus.example.edu/",
+  "portalListUrl": "https://portal.campus.example.edu/list.jsp?urltype=tree.TreeTempUrl&wbtreeid=1000",
+  "loginUrl": "https://auth.campus.example.edu/login"
+}
+```
+
+`loginUrl` 可以省略或设为空字符串。文件和粘贴文本最多 16 KiB，只接受上述字段，拒绝重复或未知字段、非支持版本以及夹带登录凭据的网址。不要添加 `username`、`password`、Cookie、动态码、SDK 票据或 AI Key。
+
+解析成功后先显示四项地址与当前草稿的差异，确认后填入草稿，再由用户阅读服务说明并保存。取消或格式无效不会覆盖已保存配置或断开现有连接。导入本身不连接服务、不替用户勾选同意，也不是订阅、阅读状态或登录会话备份。
 
 阅读并同意连接服务说明后才能保存和启用校园连接。SDK 可能处理设备、系统和网络信息以完成认证及学校安全检查；首次配置前不初始化连接 SDK。首次保存后可立即进入校园认证，再单独完成门户登录。已有授权会话可在返回前台时尝试恢复。
 
@@ -73,7 +100,30 @@ PowerShell 示例（将路径替换为自己的文件）：
 
 本轮发布构建使用 `:app:assembleRelease :app:lintRelease`，生成 `app/build/outputs/apk/release/app-release-unsigned.apk`。该产物须由维护者使用自己的私有签名密钥另行签名，并通过 `apksigner verify` 检查。本轮交付的本地 APK 已在仓库之外签名；源码不附该密钥。
 
-当前应用版本为 `0.5.0-campus`，版本号为 `8`，公开版应用 ID 为 `org.campusreader.reader`，Java 包名前缀为 `org.campusreader`。不同包名的安装属于独立应用，不会自动接管其他包名下的缓存或登录状态。新版按站点配置及账号建立缓存命名空间，不会自动将旧版仅按账号保存的数据归入新站点。
+当前应用版本为 `0.6.0-campus`，版本号为 `10`，公开版应用 ID 为 `org.campusreader.reader`，Java 包名前缀为 `org.campusreader`。不同包名的安装属于独立应用，不会自动接管其他包名下的缓存或登录状态。按站点配置及账号建立缓存命名空间，不会自动将旧版仅按账号保存的数据归入新站点；同包名、同签名升级时，数据库迁移保留阅读状态并增加摘要表。
+
+## 配置可选 AI 摘要
+
+首装不预设服务方、模型或密钥，也不会在刷新通知时自动调用 AI。进入侧栏的 AI 设置，为当前站点和账号填写：
+
+- 完整 HTTPS `chat/completions` 地址，例如 `https://api.example.com/v1/chat/completions`；这个示例不是可用服务。地址不得夹带凭据、查询参数或片段。
+- 服务方提供的模型 ID，服务须支持 `response_format: {"type":"json_object"}`、`messages`、`temperature` 和 `max_tokens` 参数。
+- 用户自己的 API Key；启用并保存。保存不会发送测试请求。
+
+响应应为兼容的 `choices[0].message.content` JSON 文本，且 `finish_reason` 为 `stop`。目前不支持需要其他认证方式、不同响应结构或仅支持流式输出的接口。部分标为兼容的模型仍可能拒绝这些参数，应先核对服务文档；本版未使用真实服务账号验证具体服务方。
+
+在有文字正文的通知中选择“AI 摘要”，确认页展示服务方和完整发送文字。每次最多 12,000 字符，输出上限 1,000 tokens；每个本地账号每天最多 20 次尝试。超长文章直接拒绝，不静默截断。已缓存摘要直接读取，不因普通刷新重复计费；主动重新生成需再次确认。失败、超时或取消可能已产生服务费用，都会计入本机尝试次数，没有自动重试；本机限制不等于服务端账单预算。
+
+API Key 使用 AndroidKeyStore 的 AES/GCM 加密保存，不出现在配置导入或源码包中。更换服务地址须重新填写对应密钥，避免将旧密钥发给新服务。关闭 AI 保留已有摘要；可分别删除密钥、清空当前账号的摘要。清除正文或正文变化会使相应摘要失效，原有阅读状态、标签和稍后读独立保留。
+
+## 生成源码包
+
+```sh
+python scripts/check_public_tree.py
+python scripts/package_source.py
+```
+
+源码包名称为 `campus-reader-0.6.0-source.zip`，包含文件清单与校验信息，不包含 SDK、实际配置、账号、API Key、私有签名和设备数据。安装包可另命名为 `campus-reader-0.6.0.apk`；打包及签名结果以交付时的校验文件为准。
 
 ## 正式发行前
 

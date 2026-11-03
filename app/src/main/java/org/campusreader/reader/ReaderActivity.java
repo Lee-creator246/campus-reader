@@ -56,7 +56,7 @@ public class ReaderActivity extends Activity {
         lastAccessReady=ready;updateConnectionStatus();if(ready)drainPortalRefresh();mainHandler.postDelayed(this,1000);
     }};
     private CampusPortalParser.MoreRequest nextPage;
-    private TextView status,heading,connectionStatus;
+    private TextView status,heading,connectionStatus,connectionHint;
     private Button refresh,more,portalButton;
     private ListView list;
     private TextView emptyTitle,emptyHint;
@@ -156,7 +156,7 @@ public class ReaderActivity extends Activity {
         if(busy||clearingSession){message("请等待当前刷新或登录处理完成后再配置。");return;}
         configurationLease=SyncGate.tryAcquire("configuration");
         if(configurationLease==null){message("后台正在刷新，请稍后再配置。");return;}
-        RefreshScheduler.cancel(this);new ReaderPreferences(this).clearPortalSession();
+        // Preview/cancel must preserve the live portal session. The lease alone pauses sync.
         startActivityForResult(new Intent(this,CampusConfigActivity.class),CONFIG);
     }
     private void closeForConfiguration(){
@@ -167,7 +167,7 @@ public class ReaderActivity extends Activity {
     private void acceptNotification(Intent intent){if(intent!=null&&intent.getBooleanExtra(ReaderNotifications.EXTRA_UNREAD,false)&&profile.equals(intent.getStringExtra(ReaderNotifications.EXTRA_PROFILE))){source=CampusPortalParser.SOURCE;priorityOnly=intent.getBooleanExtra(ReaderNotifications.EXTRA_PRIORITY,false);sourceTitle=priorityOnly?"重点关注":"校内通知";filter=1;libraryFilter=new ReaderFilterState();libraryFilter.save(preferences,profile);}}
     private void rememberListPosition(){if(list!=null&&!detailVisible){savedListScope=listScope;savedListPosition=list.getFirstVisiblePosition();View first=list.getChildAt(0);savedListTop=first==null?0:first.getTop();}}
     private String scope(){return profile+"|"+source+"|"+priorityOnly+"|"+keywordRules.fingerprint()+"|"+filter+"|"+libraryFilter.search+"|"+libraryFilter.include+"|"+libraryFilter.exclude+"|"+libraryFilter.tags;}
-    private void showList() {
+    protected void showList() {
         rememberListPosition();detailVisible=false;
         if(detailWeb!=null){detailWeb.destroy();detailWeb=null;}
         if(pendingSearch!=null)mainHandler.removeCallbacks(pendingSearch);
@@ -209,6 +209,7 @@ public class ReaderActivity extends Activity {
     private void clearFilters(){libraryFilter=new ReaderFilterState();libraryFilter.save(preferences,profile);generation++;showList();}
     private void updateEmptyState(){
         if(emptyTitle==null)return;boolean filtered=libraryFilter.active()||filter!=0;
+        if(keywordRules.loadFailed){emptyTitle.setText("关键词规则暂时无法读取");emptyHint.setText("列表已暂停显示，缓存和阅读状态仍保留。可在关键词规则中重试读取或恢复上一版。");emptyAction.setText("检查关键词规则");emptyAction.setEnabled(true);emptyAction.setAlpha(1f);emptyAction.setOnClickListener(v->openKeywordRules());emptyMore.setVisibility(View.GONE);return;}
         if(CampusPortalParser.SOURCE.equals(source)&&!CampusConfiguration.isConfigured()){
             emptyTitle.setText("先配置校园访问");emptyHint.setText("填写校园入口和门户地址后，依次完成校园认证与信息门户登录。");
             emptyAction.setText("校园配置");emptyAction.setEnabled(true);emptyAction.setAlpha(1f);
@@ -246,23 +247,33 @@ public class ReaderActivity extends Activity {
         updateEmptyState();updateConnectionStatus();renderStatus();
     }
     private void updateConnectionStatus(){
-        if(!CampusConfiguration.isConfigured()){
-            if(connectionStatus!=null)connectionStatus.setText("尚未配置校园访问");
-            if(portalButton!=null){portalButton.setText("配置后登录信息门户");portalButton.setEnabled(true);}
-            return;
-        }
         if(connectionStatus==null)return;
-        boolean ready=CampusApplication.auth().isAccessReady(),required=CampusApplication.auth().isPortalAuthenticationRequired();
         boolean checking=busy&&profile.equals(refreshingProfile)&&CampusPortalParser.SOURCE.equals(refreshingSource);
-        String portal=checking&&!portalVerified?"检查中":deferredPortalRefresh.hasRequest()?"等待检查":required?"需登录":portalVerified?"已验证":"待检查";
-        connectionStatus.setText((ready?"校园已连接":"校园未连接")+" · 门户"+portal);
-        if(portalButton!=null){portalButton.setEnabled(!busy&&!clearingSession);portalButton.setAlpha(busy||clearingSession?.38f:1f);portalButton.setText(required?"登录信息门户":portalVerified?"信息门户":"检查 / 登录信息门户");}
+        CampusConnectionStatus.PortalState portal=checking?CampusConnectionStatus.PortalState.CHECKING:
+                deferredPortalRefresh.hasRequest()||clearingSession?CampusConnectionStatus.PortalState.WAITING:
+                portalVerified?CampusConnectionStatus.PortalState.VERIFIED:CampusConnectionStatus.PortalState.UNKNOWN;
+        CampusConnectionStatus view=CampusApplication.auth().connectionStatus(portal);
+        connectionStatus.setText(view.title);
+        if(connectionHint!=null){long last=new ReaderPreferences(this).getLastSuccessfulMillis(profile);
+            connectionHint.setText(view.detail+(last>0?"\n上次完整同步："+android.text.format.DateFormat.format("MM-dd HH:mm",last):"\n尚未完成一次同步"));}
+        if(portalButton!=null){boolean enabled=!busy&&!clearingSession&&view.action!=CampusConnectionStatus.Action.WAIT;
+            portalButton.setEnabled(enabled);portalButton.setAlpha(enabled?1f:.38f);portalButton.setText(view.actionLabel);
+            portalButton.setOnClickListener(v->{closeDrawer();switch(view.action){
+                case CONFIGURE:openCampusConfiguration();break;case RESTART:closeForConfiguration();break;
+                case CONNECT:connect();break;case CHECK_PORTAL:case REFRESH:checkCampusPortal();break;
+                case LOGIN_PORTAL:portalLogin();break;default:break;
+            }});
+        }
     }
 
     private void message(String value){lastMessage=value;renderStatus();if(resumed&&!detailVisible&&nativeDrawer!=null&&!nativeDrawer.isDrawerOpen(androidx.core.view.GravityCompat.START))Toast.makeText(this,value,Toast.LENGTH_SHORT).show();}
     private void refreshUi(long requestId,String requestProfile,Runnable action){runOnUiThread(()->{if(!isDestroyed()&&requestId==refreshSequence&&requestProfile.equals(profile))action.run();});}
 
     private void closeDrawer(){if(nativeDrawer!=null)nativeDrawer.closeDrawer(androidx.core.view.GravityCompat.START);}
+    void checkCampusPortal(){
+        if(!CampusPortalParser.SOURCE.equals(source))selectSource(CampusPortalParser.SOURCE,"校内通知",0);
+        refresh(false);
+    }
     private void drawerSection(LinearLayout panel,String value){TextView label=text(value,12,MUTED);label.setPadding(dp(16),dp(20),dp(16),dp(8));panel.addView(label);}
     private TextView drawerItem(LinearLayout panel,String image,String value,boolean selected,Runnable action){
         View item=getLayoutInflater().inflate(R.layout.reader_item_list_group,panel,false);ImageView symbol=item.findViewById(R.id.reader_image);symbol.setImageDrawable(ReaderUi.icon(this,image,selected?BLUE:MUTED));TextView label=item.findViewById(R.id.reader_text);label.setText(value);label.setTextColor(selected?BLUE:INK);TextView count=item.findViewById(R.id.reader_textCount);count.setText("");item.findViewById(R.id.reader_ll_selected).setBackgroundColor(BLUE);item.findViewById(R.id.reader_ll_selected).setVisibility(selected?View.VISIBLE:View.INVISIBLE);item.setBackgroundColor(selected?0xfff1f5fc:Color.WHITE);item.setContentDescription(value);item.setOnClickListener(v->{closeDrawer();action.run();});panel.addView(item);return count;
@@ -276,12 +287,16 @@ public class ReaderActivity extends Activity {
         laterCount=drawerItem(drawerPanel,"star","稍后读",filter==2&&!priorityOnly,()->selectSource(CampusPortalParser.SOURCE,"稍后读",2));
         priorityCount=drawerItem(drawerPanel,"eye","重点关注",priorityOnly,()->showPriority());
         drawerItem(drawerPanel,"settings","关键词规则",false,()->openKeywordRules());
+        drawerItem(drawerPanel,"refresh","刷新与提醒记录",false,()->startActivity(new Intent(this,NotificationHistoryActivity.class).putExtra(NotificationHistoryActivity.EXTRA_PROFILE,profile)));
+        drawerItem(drawerPanel,"summary","AI 摘要服务",false,()->startActivity(new Intent(this,AiSettingsActivity.class).putExtra(AiSettingsActivity.EXTRA_PROFILE,profile)));
         drawerSection(drawerPanel,"订阅");drawerItem(drawerPanel,"feed","校内通知",CampusPortalParser.SOURCE.equals(source)&&filter!=2&&!priorityOnly&&libraryFilter.tags.isEmpty()&&!sourceTitle.equals("全部校内通知"),()->selectSource(CampusPortalParser.SOURCE,"校内通知",0));for(Subscription subItem:subscriptions)drawerItem(drawerPanel,"feed",subItem.title,RssParser.source(subItem.url).equals(source),()->selectSource(RssParser.source(subItem.url),subItem.title,0));drawerItem(drawerPanel,"link","添加 / 管理订阅",false,()->subscriptionMenu());
         drawerSection(drawerPanel,"标签");LinearLayout tagsPanel=column();drawerPanel.addView(tagsPanel);drawerItem(drawerPanel,"tag","管理标签",false,()->manageTags());
         drawerSection(drawerPanel,"校园访问");connectionStatus=text("",12,MUTED);connectionStatus.setPadding(dp(16),0,dp(16),dp(8));drawerPanel.addView(connectionStatus);
+        connectionHint=text("",12,MUTED);connectionHint.setPadding(dp(16),0,dp(16),dp(8));drawerPanel.addView(connectionHint);
         drawerItem(drawerPanel,"settings","校园配置",false,()->openCampusConfiguration());
         drawerItem(drawerPanel,"link","校园认证",false,()->connect());
         portalButton=button("检查 / 登录信息门户",v->{closeDrawer();portalLogin();});portalButton.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);portalButton.setPadding(dp(56),0,dp(16),0);drawerPanel.addView(portalButton,new LinearLayout.LayoutParams(-1,dp(48)));
+        drawerItem(drawerPanel,"link","打开门户登录页",false,()->portalLogin());
         drawerItem(drawerPanel,"refresh","刷新通知",false,()->refresh(false));
         status=text(statusText(),12,MUTED);status.setPadding(dp(16),dp(4),dp(16),dp(12));drawerPanel.addView(status);
         View separator=new View(this);separator.setBackgroundColor(ReaderUi.LINE);drawerPanel.addView(separator,new LinearLayout.LayoutParams(-1,dp(1)));drawerItem(drawerPanel,"download","下载文件",false,()->MediaActions.viewDownloads(this));View settingsRow=getLayoutInflater().inflate(R.layout.reader_list_footer,drawerPanel,false);((TextView)settingsRow.findViewById(R.id.reader_text_settings)).setText("设置");settingsRow.findViewById(R.id.reader_ll_settings).setOnClickListener(v->{closeDrawer();openSettings();});drawerPanel.addView(settingsRow);
@@ -319,7 +334,7 @@ public class ReaderActivity extends Activity {
         }
         return false;
     }
-    private void refresh(boolean loadMore) {
+    protected void refresh(boolean loadMore) {
         if(busy||clearingSession)return;
         final boolean campus=CampusPortalParser.SOURCE.equals(source);
         if(campus&&!CampusConfiguration.isConfigured()){openCampusConfiguration();return;}
@@ -395,6 +410,9 @@ public class ReaderActivity extends Activity {
         unread.setOnClickListener(v->{opened[0]=true;flags[0]=!flags[0];updateDetailButtons(unread,later,flags);setFlag(notice.key,true,flags[0],null);});
         later.setOnClickListener(v->{flags[1]=!flags[1];updateDetailButtons(unread,later,flags);setFlag(notice.key,false,flags[1],null);});
         bar.findViewById(R.id.reader_btn_tag).setOnClickListener(v->editTags(notice.key));bar.findViewById(R.id.reader_btn_share).setOnClickListener(v->shareNotice(notice));bar.findViewById(R.id.reader_btn_more).setOnClickListener(v->showArticleMenu(cached,notice));
+        Button summary=bar.findViewById(R.id.reader_btn_summary);summary.setCompoundDrawablesWithIntrinsicBounds(null,ReaderUi.icon(this,"summary",INK),null,null);summary.setOnClickListener(v->openSummary(notice.key));
+        ((Button)bar.findViewById(R.id.reader_btn_tag)).setCompoundDrawablesWithIntrinsicBounds(null,ReaderUi.icon(this,"tag",INK),null,null);
+        ((Button)bar.findViewById(R.id.reader_btn_more)).setCompoundDrawablesWithIntrinsicBounds(null,ReaderUi.icon(this,"more",INK),null,null);
         if(!hasBody)root.addView(button("正文已清理 · 联网重新获取",v->refetchBody(cached)),new LinearLayout.LayoutParams(-1,dp(48)));
         detailWeb=new WebView(this);detailWeb.setBackgroundColor(Color.WHITE);WebSettings settings=detailWeb.getSettings();settings.setJavaScriptEnabled(false);settings.setAllowFileAccess(false);settings.setAllowContentAccess(false);settings.setDomStorageEnabled(false);settings.setTextZoom(preferences.getInt("reader-text-zoom",100));
         detailWeb.setWebViewClient(new WebViewClient(){
@@ -419,9 +437,13 @@ public class ReaderActivity extends Activity {
         later.setText("稍后读");later.setContentDescription(flags[1]?"取消稍后读":"稍后读");later.setTextColor(flags[1]?BLUE:INK);later.setCompoundDrawablesWithIntrinsicBounds(null,ReaderUi.icon(this,flags[1]?"article_star_filled":"article_star",flags[1]?BLUE:INK),null,null);
     }
     private void shareNotice(CampusNotice notice){Intent share=new Intent(Intent.ACTION_SEND);share.setType("text/plain");share.putExtra(Intent.EXTRA_SUBJECT,notice.title);share.putExtra(Intent.EXTRA_TEXT,notice.title+"\n"+notice.originalUrl);startActivity(Intent.createChooser(share,"分享文章"));}
+    private void openSummary(NoticeKey key){startActivity(new Intent(this,AiSummaryActivity.class)
+            .putExtra(AiSummaryActivity.EXTRA_PROFILE,profile).putExtra(AiSummaryActivity.EXTRA_SOURCE,key.source).putExtra(AiSummaryActivity.EXTRA_STABLE_ID,key.stableId));}
     private void showArticleMenu(CachedNotice cached,CampusNotice notice){
         List<String> names=new ArrayList<>();List<Runnable> actions=new ArrayList<>();
         names.add("打开原文");actions.add(()->openExternal(notice.originalUrl));names.add("正文字号");actions.add(()->showTextSize());
+        names.add("AI 摘要");actions.add(()->openSummary(notice.key));
+        names.add("分享通知");actions.add(()->shareNotice(notice));
         if(!notice.imageUrls.isEmpty()){names.add("查看图片（"+notice.imageUrls.size()+"）");actions.add(()->MediaActions.showImages(this,profile,notice.imageUrls,0));}
         if(!notice.attachments.isEmpty()){names.add("附件（"+notice.attachments.size()+"）");actions.add(()->showAttachments(notice));}
         if(!cached.bodyCached){names.add("重新获取正文");actions.add(()->refetchBody(cached));}

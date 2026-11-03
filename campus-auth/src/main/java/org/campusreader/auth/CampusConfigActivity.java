@@ -1,6 +1,7 @@
 package org.campusreader.auth;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -10,6 +11,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
+import android.text.InputFilter;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
@@ -23,18 +25,24 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import org.campusreader.config.CampusConfigImport;
 import org.campusreader.config.CampusSite;
+import java.io.InputStream;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Native setup. Values stay inside private app storage and are never included in Activity results. */
 public final class CampusConfigActivity extends Activity {
     public static final int RESULT_RESTART_REQUIRED = RESULT_FIRST_USER;
+    private static final int IMPORT_FILE = 3401;
     private static final int BLUE=0xff2767d8, INK=0xff202124, MUTED=0xff647082, BACKGROUND=0xfff5f6f8;
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final ExecutorService imports = Executors.newSingleThreadExecutor();
     private EditText domain, vpn, list, portalLogin;
     private CheckBox consent;
     private TextView status;
-    private Button save, back;
-    private boolean saving;
+    private Button save, back, pasteImport, fileImport;
+    private boolean saving, importing;
     private final Runnable clearDeadline = () -> showSaveFailure();
 
     @Override public void onCreate(Bundle state) {
@@ -55,6 +63,15 @@ public final class CampusConfigActivity extends Activity {
         LinearLayout page=column();page.setPadding(dp(20),dp(24),dp(20),dp(24));scroll.addView(page);
         TextView heading=text("设置你的校园访问入口",22,INK);heading.setTypeface(Typeface.DEFAULT,Typeface.BOLD);page.addView(heading);
         add(page,text("向学校确认以下地址后填写。示例仅帮助理解格式，不会自动填入或连接。保存后先完成校园连接，再单独登录信息门户。",14,MUTED),10);
+
+        LinearLayout importActions=new LinearLayout(this);importActions.setGravity(Gravity.CENTER_VERTICAL);
+        pasteImport=button("粘贴配置",false);fileImport=button("从文件导入",false);
+        LinearLayout.LayoutParams importLeft=new LinearLayout.LayoutParams(0,-2,1);importLeft.rightMargin=dp(6);
+        LinearLayout.LayoutParams importRight=new LinearLayout.LayoutParams(0,-2,1);importRight.leftMargin=dp(6);
+        importActions.addView(pasteImport,importLeft);importActions.addView(fileImport,importRight);add(page,importActions,18);
+        add(page,text("支持 version 1 的校园阅读 JSON 配置（UTF-8，最多 16 KiB）。先预览差异，再填入下方；只有点击保存才会更改校园访问。配置不得含账号、密码或登录票据。",12,MUTED),8);
+        pasteImport.setOnClickListener(v->pasteConfiguration());
+        fileImport.setOnClickListener(v->chooseConfigurationFile());
 
         LinearLayout form=column();form.setPadding(dp(18),dp(18),dp(18),dp(18));form.setBackground(shape(Color.WHITE,0xffe5e8ee,14));add(page,form,24);
         domain=field(form,"校园认证域","例如 campus.example.edu",false);
@@ -77,7 +94,7 @@ public final class CampusConfigActivity extends Activity {
     }
 
     private void saveConfiguration() {
-        if(saving)return;
+        if(saving||importing)return;
         if(CampusConfiguration.requiresRestart()){finishWithResult(RESULT_RESTART_REQUIRED);return;}
         if(!consent.isChecked()){status.setText("请先阅读并勾选连接服务说明；同意前不会启动连接 SDK。");return;}
         final CampusSite.Profile next;
@@ -126,6 +143,73 @@ public final class CampusConfigActivity extends Activity {
     }
     private void setFormEnabled(boolean enabled){
         domain.setEnabled(enabled);vpn.setEnabled(enabled);list.setEnabled(enabled);portalLogin.setEnabled(enabled);consent.setEnabled(enabled);save.setEnabled(enabled);back.setEnabled(enabled);
+        pasteImport.setEnabled(enabled);fileImport.setEnabled(enabled);
+    }
+    private void pasteConfiguration(){
+        if(saving||importing||CampusConfiguration.requiresRestart())return;
+        LinearLayout content=column();content.setPadding(dp(20),dp(8),dp(20),0);
+        TextView help=text("粘贴站点 JSON 后点击预览。预览只校验内容，不会保存或连接校园服务。",13,MUTED);content.addView(help);
+        EditText input=new EditText(this);input.setHint("{\"format\":\"campus-reader-site\",\"version\":1,…}");input.setMinLines(5);input.setMaxLines(10);input.setGravity(Gravity.TOP|Gravity.START);input.setTextSize(13);
+        input.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        input.setSaveEnabled(false);input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(CampusConfigImport.MAX_BYTES+1)});
+        if(Build.VERSION.SDK_INT>=26)input.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        add(content,input,8);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("粘贴校园配置").setView(content)
+                .setPositiveButton("预览差异",null).setNegativeButton("取消",null).create();
+        dialog.setOnShowListener(ignored->{
+            dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+                try{CampusSite.Profile next=CampusConfigImport.parse(input.getText().toString());dialog.dismiss();previewImport(next);}
+                catch(IllegalArgumentException invalid){input.setError(invalid.getMessage());}
+            });
+        });dialog.show();
+    }
+    private void chooseConfigurationFile(){
+        if(saving||importing||CampusConfiguration.requiresRestart())return;
+        Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                .putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/json","text/plain","application/octet-stream"});
+        try{startActivityForResult(intent,IMPORT_FILE);}
+        catch(RuntimeException unavailable){status.setText("无法打开文件选择器，请改用粘贴配置。");}
+    }
+    @Override protected void onActivityResult(int request,int result,Intent data){
+        super.onActivityResult(request,result,data);
+        if(request!=IMPORT_FILE||result!=RESULT_OK||data==null||data.getData()==null)return;
+        if(saving||importing||CampusConfiguration.requiresRestart())return;
+        final android.net.Uri uri=data.getData();
+        if(!"content".equals(uri.getScheme())){status.setText("请选择系统文件选择器提供的配置文件。");return;}
+        importing=true;setFormEnabled(false);status.setText("正在读取配置文件；当前配置尚未更改…");
+        imports.execute(()->{
+            try(InputStream input=getContentResolver().openInputStream(uri)){
+                CampusSite.Profile next=CampusConfigImport.read(input);
+                main.post(()->{if(isDestroyed()||isFinishing())return;importing=false;setFormEnabled(true);status.setText("");previewImport(next);});
+            }catch(Exception failure){
+                String message=failure instanceof IllegalArgumentException?failure.getMessage():"未能读取配置文件，请重新选择，或改用粘贴配置。";
+                main.post(()->{if(isDestroyed()||isFinishing())return;importing=false;setFormEnabled(true);status.setText(message);});
+            }
+        });
+    }
+    private void previewImport(CampusSite.Profile next){
+        if(saving||importing||CampusConfiguration.requiresRestart())return;
+        StringBuilder preview=new StringBuilder("以下对比当前表单。填入只替换表单内容，不保存、不退出连接。\n\n");
+        previewField(preview,"校园认证域",domain.getText().toString(),next.domain);
+        previewField(preview,"VPN HTTPS 入口",vpn.getText().toString(),next.vpnUrl);
+        previewField(preview,"门户通知列表",list.getText().toString(),next.portalListUrl);
+        previewField(preview,"门户登录入口",portalLogin.getText().toString(),next.loginUrl);
+        preview.append("保存后需重新认证，已有缓存按站点和账号隔离保留。导入地址不保证门户页面结构兼容。");
+        if(next.portalListUrl.startsWith("http://")||next.loginUrl.startsWith("http://"))preview.append("\n此配置包含未加密的 HTTP 门户，请向学校确认。");
+        ScrollView scroll=new ScrollView(this);TextView body=text(preview.toString(),13,INK);body.setTextIsSelectable(true);body.setPadding(dp(20),dp(12),dp(20),dp(12));scroll.addView(body);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("配置预览 · 尚未保存").setView(scroll)
+                .setPositiveButton("填入表单",(d,which)->{
+                    domain.setText(next.domain);vpn.setText(next.vpnUrl);list.setText(next.portalListUrl);portalLogin.setText(next.loginUrl);
+                    consent.setChecked(false);status.setText("已填入表单，尚未保存。请核对入口并重新勾选连接服务说明，再点击保存。");
+                }).setNegativeButton("取消",null).create();
+        dialog.setOnShowListener(ignored->dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE));dialog.show();
+    }
+    private void previewField(StringBuilder out,String label,String before,String after){
+        String current=before.trim();boolean same=current.equals(after);
+        out.append(label).append(same?" · 相同\n":" · 将更改\n");
+        if(!same)out.append("当前：").append(current.isEmpty()?"未填写":current).append('\n');
+        out.append("导入：").append(after).append("\n\n");
     }
     private void finishWithResult(int result){
         if(getCallingActivity()==null){
@@ -135,8 +219,8 @@ public final class CampusConfigActivity extends Activity {
         setResult(result);
         finish();
     }
-    @Override public void onBackPressed(){if(saving)return;if(CampusConfiguration.requiresRestart())finishWithResult(RESULT_RESTART_REQUIRED);else super.onBackPressed();}
-    @Override protected void onDestroy(){main.removeCallbacks(clearDeadline);super.onDestroy();}
+    @Override public void onBackPressed(){if(saving||importing)return;if(CampusConfiguration.requiresRestart())finishWithResult(RESULT_RESTART_REQUIRED);else super.onBackPressed();}
+    @Override protected void onDestroy(){main.removeCallbacks(clearDeadline);imports.shutdownNow();super.onDestroy();}
     private EditText field(LinearLayout form,String label,String hint,boolean url){
         EditText edit=new EditText(this);edit.setId(View.generateViewId());edit.setSingleLine(true);edit.setHint(hint);edit.setSaveEnabled(false);
         edit.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS|(url?InputType.TYPE_TEXT_VARIATION_URI:InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD));

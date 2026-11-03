@@ -5,12 +5,15 @@ sourceSets.main.java {
     srcDir '../campus-extension/src/main/java'
     srcDir '../campus-portal/src/main/java'
     srcDir '../app/src/main/java'
+    srcDir '../campus-auth/src/main/java'
     include '**/NoticeKey.java', '**/CanonicalUrlIdentity.java', '**/CampusNotice.java', '**/CachedNotice.java', '**/NoticeTag.java'
     include '**/CampusPortalParser.java', '**/KeywordTerms.java', '**/SyncGate.java', '**/RssParser.java', '**/NoticeRefreshPlan.java', '**/MediaSafety.java', '**/PortalBatchDownloader.java', '**/DeferredPortalRefresh.java'
     include '**/*Checks.java'
+    include '**/CampusConnectionStatus.java'
+    include '**/AiPolicy.java', '**/SummaryInput.java'
 }
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
-def suites = [siteConfig:'SiteConfigChecks',keywordTerms:'org.campusreader.reader.KeywordTermsChecks',syncGate:'org.campusreader.reader.SyncGateChecks',metadata:'org.campusreader.notices.MetadataRefreshChecks',rss:'org.campusreader.reader.RssChecks',refresh:'org.campusreader.reader.RefreshLifecycleChecks',media:'org.campusreader.reader.MediaSafetyChecks',identity:'IdentityChecks',parser:'ParserChecks']
+def suites = [aiCore:'org.campusreader.reader.AiCoreChecks',configImport:'ConfigImportChecks',connectionStatus:'org.campusreader.auth.ConnectionStatusChecks',siteConfig:'SiteConfigChecks',keywordTerms:'org.campusreader.reader.KeywordTermsChecks',syncGate:'org.campusreader.reader.SyncGateChecks',metadata:'org.campusreader.notices.MetadataRefreshChecks',rss:'org.campusreader.reader.RssChecks',refresh:'org.campusreader.reader.RefreshLifecycleChecks',media:'org.campusreader.reader.MediaSafetyChecks',identity:'IdentityChecks',parser:'ParserChecks']
 suites.each { taskName, entry ->
     tasks.register(taskName, JavaExec) {
         dependsOn tasks.named('classes')

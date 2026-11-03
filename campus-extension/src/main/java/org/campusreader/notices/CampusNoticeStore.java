@@ -25,13 +25,14 @@ public final class CampusNoticeStore extends SQLiteOpenHelper {
         public final int insertedUnreadCount;
         UpsertResult(List<NoticeKey> keys){insertedKeys=Collections.unmodifiableList(new ArrayList<>(keys));insertedUnreadCount=keys.size();}
     }
-    public CampusNoticeStore(Context context,String localProfileId){super(context.getApplicationContext(),databaseName(localProfileId),null,2);}
+    public CampusNoticeStore(Context context,String localProfileId){super(context.getApplicationContext(),databaseName(localProfileId),null,3);}
     @Override public void onConfigure(SQLiteDatabase db){db.setForeignKeyConstraintsEnabled(true);}
     @Override public void onCreate(SQLiteDatabase db){
         db.execSQL("CREATE TABLE campus_notices (source TEXT NOT NULL,stable_id TEXT NOT NULL,title TEXT NOT NULL,published_ms INTEGER NOT NULL,body_html TEXT NOT NULL,original_url TEXT NOT NULL,images_json TEXT NOT NULL,attachments_json TEXT NOT NULL,is_read INTEGER NOT NULL DEFAULT 0 CHECK(is_read IN (0,1)),is_later INTEGER NOT NULL DEFAULT 0 CHECK(is_later IN (0,1)),refreshed_ms INTEGER NOT NULL,body_cached INTEGER NOT NULL DEFAULT 0 CHECK(body_cached IN (0,1)),body_text TEXT NOT NULL DEFAULT '',body_bytes INTEGER NOT NULL DEFAULT 0,read_at_ms INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(source,stable_id))");
         db.execSQL("CREATE INDEX campus_publication ON campus_notices(source,published_ms DESC,stable_id ASC)");
         db.execSQL("CREATE TABLE campus_connections (source TEXT PRIMARY KEY NOT NULL,state TEXT NOT NULL CHECK(state IN ('UNKNOWN','AVAILABLE','REAUTH_REQUIRED')))");
         createV2Tables(db);
+        createSummaryTable(db);
     }
     private static void createV2Tables(SQLiteDatabase db){
         db.execSQL("CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL COLLATE NOCASE UNIQUE)");
@@ -41,7 +42,8 @@ public final class CampusNoticeStore extends SQLiteOpenHelper {
         db.execSQL("INSERT INTO cache_policy VALUES(1,300,20971520,86400000)");
     }
     @Override public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion){
-        if(oldVersion!=1||newVersion!=2)throw new IllegalStateException("Unsupported cache migration "+oldVersion+" to "+newVersion);
+        if(oldVersion<1||oldVersion>2||newVersion!=3)throw new IllegalStateException("Unsupported cache migration "+oldVersion+" to "+newVersion);
+        if(oldVersion==1){
         db.execSQL("ALTER TABLE campus_notices ADD COLUMN body_cached INTEGER NOT NULL DEFAULT 0 CHECK(body_cached IN (0,1))");
         db.execSQL("ALTER TABLE campus_notices ADD COLUMN body_text TEXT NOT NULL DEFAULT ''");
         db.execSQL("ALTER TABLE campus_notices ADD COLUMN body_bytes INTEGER NOT NULL DEFAULT 0");
@@ -54,7 +56,38 @@ public final class CampusNoticeStore extends SQLiteOpenHelper {
         // Version 1 had no read time: start its age window now rather than guessing an old read date.
         db.execSQL("UPDATE campus_notices SET read_at_ms=? WHERE is_read=1",new Object[]{now});
         enforce(db,now);
+        }
+        createSummaryTable(db);
     }
+    private static void createSummaryTable(SQLiteDatabase db){
+        db.execSQL("CREATE TABLE summary_control (singleton INTEGER PRIMARY KEY CHECK(singleton=1),generation INTEGER NOT NULL)");
+        db.execSQL("INSERT INTO summary_control VALUES(1,0)");
+        db.execSQL("CREATE TABLE notice_summaries (source TEXT NOT NULL,stable_id TEXT NOT NULL,content_hash TEXT NOT NULL,config_hash TEXT NOT NULL,result_json TEXT NOT NULL CHECK(length(CAST(result_json AS BLOB))<=16384),generated_ms INTEGER NOT NULL,PRIMARY KEY(source,stable_id),FOREIGN KEY(source,stable_id) REFERENCES campus_notices(source,stable_id) ON DELETE CASCADE)");
+        db.execSQL("CREATE TRIGGER invalidate_notice_summary AFTER UPDATE OF title,body_html,body_text,body_cached ON campus_notices WHEN NEW.title<>OLD.title OR NEW.body_html<>OLD.body_html OR NEW.body_text<>OLD.body_text OR NEW.body_cached=0 BEGIN DELETE FROM notice_summaries WHERE source=NEW.source AND stable_id=NEW.stable_id; END");
+    }
+    public static NoticeKey summaryKey(String source,String stableId){if(source==null||source.length()>512||stableId==null||stableId.length()>8192)throw new IllegalArgumentException("Invalid notice identity");return NoticeKey.stored(source,stableId);}
+    public SummaryInput summaryInput(NoticeKey key){SQLiteDatabase db=getReadableDatabase();db.beginTransactionNonExclusive();try{SummaryInput input=summaryInput(db,key);db.setTransactionSuccessful();return input;}finally{db.endTransaction();}}
+    private static SummaryInput summaryInput(SQLiteDatabase db,NoticeKey key){
+        String title;try(Cursor c=db.query("campus_notices",new String[]{"title","body_cached"},KEY_WHERE,keyArgs(key),null,null,null)){if(!c.moveToFirst()||c.getInt(1)!=1)return null;title=c.getString(0);}
+        String text=readText(db,key,"body_text");return text.trim().isEmpty()?null:new SummaryInput(title,text,summaryGeneration(db));
+    }
+    public SummaryRecord findSummary(NoticeKey key,String contentHash,String configHash){
+        try(Cursor c=getReadableDatabase().query("notice_summaries",new String[]{"result_json","generated_ms"},KEY_WHERE+" AND content_hash=? AND config_hash=?",new String[]{key.source,key.stableId,contentHash,configHash},null,null,null)){
+            return c.moveToFirst()?new SummaryRecord(contentHash,configHash,c.getString(0),c.getLong(1)):null;
+        }
+    }
+    /** Rechecks content inside the write transaction; a response cannot revive an evicted/changed body. */
+    public boolean saveSummaryIfCurrent(NoticeKey key,String expectedHash,long expectedGeneration,String configHash,String resultJson,long now){
+        if(expectedHash==null||!expectedHash.matches("[a-f0-9]{64}")||configHash==null||!configHash.matches("[a-f0-9]{64}")||resultJson==null||resultJson.trim().isEmpty()||resultJson.getBytes(StandardCharsets.UTF_8).length>16384||now<0)throw new IllegalArgumentException("Invalid summary");
+        SQLiteDatabase db=getWritableDatabase();db.beginTransaction();try{
+            SummaryInput input=summaryInput(db,key);if(input==null||input.cacheGeneration!=expectedGeneration||!input.contentHash.equals(expectedHash))return false;
+            ContentValues row=new ContentValues();row.put("source",key.source);row.put("stable_id",key.stableId);row.put("content_hash",expectedHash);row.put("config_hash",configHash);row.put("result_json",resultJson);row.put("generated_ms",now);
+            if(db.insertWithOnConflict("notice_summaries",null,row,SQLiteDatabase.CONFLICT_REPLACE)==-1)throw new IllegalStateException("Summary persistence failed");db.setTransactionSuccessful();return true;
+        }finally{db.endTransaction();}
+    }
+    private static long summaryGeneration(SQLiteDatabase db){try(Cursor c=db.rawQuery("SELECT generation FROM summary_control WHERE singleton=1",null)){if(!c.moveToFirst())throw new IllegalStateException("Missing summary generation");return c.getLong(0);}}
+    public int clearSummaries(){SQLiteDatabase db=getWritableDatabase();db.beginTransaction();try{int count=db.delete("notice_summaries",null,null);db.execSQL("UPDATE summary_control SET generation=generation+1 WHERE singleton=1");db.setTransactionSuccessful();return count;}finally{db.endTransaction();}}
+    public long summaryCount(){try(Cursor c=getReadableDatabase().rawQuery("SELECT COUNT(*) FROM notice_summaries",null)){c.moveToFirst();return c.getLong(0);}}
     public UpsertResult upsert(List<CampusNotice> notices,long refreshedAtMillis){return upsertInternal(notices,refreshedAtMillis,false);}
     /** Lightweight list refresh must not overwrite an existing cached body with an empty preview. */
     public UpsertResult upsertMetadata(List<CampusNotice> notices,long refreshedAtMillis){return upsertInternal(notices,refreshedAtMillis,true);}
@@ -167,7 +200,7 @@ public final class CampusNoticeStore extends SQLiteOpenHelper {
         }catch(JSONException e){throw new IllegalStateException("Corrupt resource metadata",e);}
     }
     /** Keep individual CursorWindow rows small even for a large (but within policy) body. */
-    private static String readText(SQLiteDatabase db,NoticeKey key,String column){if(!Arrays.asList("body_html","images_json","attachments_json").contains(column))throw new IllegalArgumentException("Unexpected content column");StringBuilder out=new StringBuilder();final int chunk=131072;for(int offset=1;;offset+=chunk){String part;try(Cursor c=db.rawQuery("SELECT substr("+column+",?,?) FROM campus_notices WHERE "+KEY_WHERE,new String[]{Integer.toString(offset),Integer.toString(chunk),key.source,key.stableId})){if(!c.moveToFirst())return "";part=c.getString(0);}out.append(part);if(part.codePointCount(0,part.length())<chunk)return out.toString();}}
+    private static String readText(SQLiteDatabase db,NoticeKey key,String column){if(!Arrays.asList("body_html","body_text","images_json","attachments_json").contains(column))throw new IllegalArgumentException("Unexpected content column");StringBuilder out=new StringBuilder();final int chunk=131072;for(int offset=1;;offset+=chunk){String part;try(Cursor c=db.rawQuery("SELECT substr("+column+",?,?) FROM campus_notices WHERE "+KEY_WHERE,new String[]{Integer.toString(offset),Integer.toString(chunk),key.source,key.stableId})){if(!c.moveToFirst())return "";part=c.getString(0);}out.append(part);if(part.codePointCount(0,part.length())<chunk)return out.toString();}}
     private static String string(Cursor c,String col){return c.getString(c.getColumnIndexOrThrow(col));}
     private static long number(Cursor c,String col){return c.getLong(c.getColumnIndexOrThrow(col));}
     private static String[] keyArgs(NoticeKey key){if(key==null)throw new IllegalArgumentException("Missing key");return new String[]{key.source,key.stableId};}

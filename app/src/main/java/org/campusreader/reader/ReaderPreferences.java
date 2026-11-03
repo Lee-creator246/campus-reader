@@ -8,7 +8,8 @@ public final class ReaderPreferences {
     public static String lastProfileKey(){return "lastProfile:"+org.campusreader.config.CampusSite.scopeId();}
     private static final Object SESSION_LOCK = new Object();
     private final SharedPreferences prefs;
-    public ReaderPreferences(Context context) { prefs=context.getApplicationContext().getSharedPreferences("reader-settings",Context.MODE_PRIVATE); }
+    private final Context context;
+    public ReaderPreferences(Context context) { this.context=context.getApplicationContext();prefs=this.context.getSharedPreferences("reader-settings",Context.MODE_PRIVATE); }
     public boolean isBackgroundEnabled(){return prefs.getBoolean("background",true);}
     public void setBackgroundEnabled(boolean value){prefs.edit().putBoolean("background",value).apply();}
     public int getIntervalMinutes(){return SyncGate.intervalMinutes(prefs.getInt("interval",60));}
@@ -25,9 +26,20 @@ public final class ReaderPreferences {
     public void setReadRetentionMs(long value){if(value< -1)throw new IllegalArgumentException("Invalid age");prefs.edit().putLong("readRetentionMs",value).apply();}
     public long getImageCacheLimitBytes(){return prefs.getLong("imageCacheLimit",40L*1024*1024);}
     public void setImageCacheLimitBytes(long value){if(value<0)throw new IllegalArgumentException("Negative bytes");prefs.edit().putLong("imageCacheLimit",value).apply();}
-    public long getLastAttemptMillis(){return prefs.getLong("lastAttempt",0);}
-    public String getLastResult(){return prefs.getString("lastResult","");}
-    void recordResult(CampusSyncEngine.Result result){prefs.edit().putLong("lastAttempt",System.currentTimeMillis()).putString("lastResult",result.status.name()).apply();}
+    public long getLastAttemptMillis(){return getLastAttemptMillis(visibleProfile());}
+    public String getLastResult(){return getLastResult(visibleProfile());}
+    public long getLastAttemptMillis(String profile){return NotificationHistory.validProfile(profile)?prefs.getLong("lastAttempt:"+profile,0):0;}
+    public String getLastResult(String profile){return NotificationHistory.validProfile(profile)?prefs.getString("lastResult:"+profile,""):"";}
+    public long getLastSuccessfulMillis(String profile){return NotificationHistory.validProfile(profile)?prefs.getLong("lastSuccess:"+profile,0):0;}
+    public long getLastSuccessfulMillis(){return getLastSuccessfulMillis(visibleProfile());}
+    private String visibleProfile(){String profile=CampusSyncEngine.currentProfile();return profile.isEmpty()?context.getSharedPreferences("reader-local",Context.MODE_PRIVATE).getString(lastProfileKey(),"local"):profile;}
+    void recordResult(CampusSyncEngine.Result result){
+        if(!NotificationHistory.validProfile(result.profile))return;
+        long now=System.currentTimeMillis();SharedPreferences.Editor edit=prefs.edit().putLong("lastAttempt:"+result.profile,now).putString("lastResult:"+result.profile,result.status.name());
+        // Partial work is reported honestly and must not replace the last fully successful refresh.
+        if(result.status==CampusSyncEngine.Status.SUCCESS)edit.putLong("lastSuccess:"+result.profile,now);
+        edit.apply();
+    }
     public String getPortalProfile(){return prefs.getString("portalProfile","");}
     public long getPortalGeneration(){return prefs.getLong("portalGeneration",0);}
     public void clearPortalSession(){synchronized(SESSION_LOCK){prefs.edit().remove("portalProfile").putLong("portalGeneration",getPortalGeneration()+1).apply();}}

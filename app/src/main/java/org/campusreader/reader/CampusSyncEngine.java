@@ -48,6 +48,7 @@ public final class CampusSyncEngine {
         Result result=performSync(context,profile,request,background,cancel,progress);
         // Include short-circuits (busy, offline, no cookie, cancelled), not just downloaded pages.
         new ReaderPreferences(context).recordResult(result);
+        NotificationHistory.refresh(context,result,background);
         return result;
     }
     private static Result performSync(Context context,String profile,CampusPortalParser.MoreRequest request,boolean background,CancelCheck cancel,ProgressListener progress){

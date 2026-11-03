@@ -23,6 +23,10 @@
         </activity>
         <activity android:name=".ReaderSettingsActivity" android:exported="false" />
         <activity android:name=".KeywordRulesActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".RulePreviewActivity" android:exported="false" />
+        <activity android:name=".NotificationHistoryActivity" android:exported="false" />
+        <activity android:name=".AiSummaryActivity" android:exported="false" />
+        <activity android:name=".AiSettingsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".MediaViewerActivity" android:exported="false" />
         <activity android:name=".MediaDownloadsActivity" android:exported="false" />
         <activity android:name=".MediaExportActivity" android:exported="false" />

@@ -10,18 +10,32 @@ android {
         // Initial vendor-SDK proof build follows the supplied Demo's target.
         // Raising targetSdk requires validating the vendor native tunnel lifecycle.
         targetSdk 30
-        versionCode 8
-        versionName '0.5.0-campus'
+        versionCode 10
+        versionName '0.6.0-campus'
         ndk { abiFilters 'arm64-v8a' }
     }
     buildTypes {
         debug { minifyEnabled false }
-        release { minifyEnabled false }
+        release {
+            minifyEnabled false
+            vcsInfo.include false
+        }
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
         coreLibraryDesugaringEnabled true
+    }
+    testOptions {
+        unitTests.includeAndroidResources = true
+        unitTests.all {
+            systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'
+            jvmArgs '--add-opens=java.base/java.lang=ALL-UNNAMED', '--add-opens=java.base/java.util=ALL-UNNAMED',
+                    '--add-opens=java.base/java.io=ALL-UNNAMED', '--add-opens=java.base/java.net=ALL-UNNAMED',
+                    '--add-opens=java.base/java.security=ALL-UNNAMED', '--add-opens=java.base/java.text=ALL-UNNAMED',
+                    '--add-opens=java.base/jdk.internal.access=ALL-UNNAMED', '--add-opens=java.desktop/java.awt.font=ALL-UNNAMED',
+                    '--add-opens=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED'
+        }
     }
     packaging {
         jniLibs {
@@ -37,6 +51,8 @@ android {
 }
 
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.17'
     implementation 'androidx.drawerlayout:drawerlayout:1.2.0'
     implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.2.0'
     implementation files(rootProject.ext.sangforSdkFile)
@@ -45,6 +61,7 @@ dependencies {
     implementation project(':campus-extension')
     implementation project(':campus-portal')
     implementation 'org.jsoup:jsoup:1.23.2'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.1.5'
 }
 
