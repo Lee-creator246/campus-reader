@@ -51,7 +51,7 @@ public class AiTransportTest {
             final Request[] captured=new Request[1];String response=envelope();
             AiTransport.generate(config(),SOURCE,new AiTransport.Cancellation(),()->{},request->{captured[0]=request;return new FakeCall(request,200,response);});
             assertNull(captured[0].header("Cookie"));assertNull(captured[0].header("Referer"));assertEquals("Bearer test-api-key",captured[0].header("Authorization"));assertEquals(0,cookieReads.get());
-            Buffer buffer=new Buffer();captured[0].body().writeTo(buffer);JSONObject body=new JSONObject(buffer.readUtf8());assertEquals(SOURCE,body.getJSONArray("messages").getJSONObject(1).getString("content"));assertFalse(body.toString().contains("test-api-key"));assertFalse(body.toString().contains("campus-secret"));assertEquals(1000,body.getInt("max_tokens"));
+            Buffer buffer=new Buffer();captured[0].body().writeTo(buffer);JSONObject body=new JSONObject(buffer.readUtf8());assertEquals(SOURCE,body.getJSONArray("messages").getJSONObject(1).getString("content"));assertFalse(body.toString().contains("test-api-key"));assertFalse(body.toString().contains("campus-secret"));assertEquals(AiPolicy.MAX_OUTPUT_TOKENS,body.getInt("max_tokens"));
         }finally{CookieHandler.setDefault(previous);}
     }
     @Test public void redirectAndRateLimitProduceExactlyOneAttemptWithoutFollowup()throws Exception{
@@ -71,5 +71,49 @@ public class AiTransportTest {
     @Test public void timeoutAndResponseLimitsFailWithoutRetry()throws Exception{
         AtomicInteger calls=new AtomicInteger();try{AiTransport.generate(config(),SOURCE,new AiTransport.Cancellation(),()->{},request->{calls.incrementAndGet();FakeCall fake=new FakeCall(request,200,"{}");fake.failure=new SocketTimeoutException("synthetic timeout");return fake;});fail();}catch(SocketTimeoutException expected){assertTrue(AiTransport.failureMessage(expected).contains("超时"));}assertEquals(1,calls.get());
         char[] huge=new char[AiPolicy.MAX_RESPONSE_BYTES+1];Arrays.fill(huge,'x');try{AiTransport.generate(config(),SOURCE,new AiTransport.Cancellation(),()->{},request->new FakeCall(request,200,new String(huge)));fail();}catch(IOException expected){assertEquals("RESPONSE_LIMIT",expected.getMessage());}
+    }
+    private String rawEnvelope(String content,String finish)throws Exception{return new JSONObject().put("choices",new JSONArray().put(new JSONObject().put("finish_reason",finish).put("message",new JSONObject().put("content",content).put("reasoning_content","private reasoning is never displayed")))).toString();}
+    @Test public void providerTransportUsesFinalJsonAndOnlyDeepSeekGetsThinkingFlag()throws Exception{
+        for(AiProvider provider:AiProvider.values()){
+            AiSettings.Config service=new AiSettings.Config(true,provider==AiProvider.DEEPSEEK?provider.defaultEndpoint:config().endpoint,"test-model","test-api-key",1,provider);
+            final Request[] captured=new Request[1];String response=rawEnvelope(" {\"evidence\":[]} ","stop");
+            assertEquals("{\"evidence\":[]}",AiTransport.requestJson(service,"Return JSON object {\"evidence\":[]}",SOURCE,new AiTransport.Cancellation(),()->{},request->{captured[0]=request;return new FakeCall(request,200,response);}));
+            Buffer buffer=new Buffer();captured[0].body().writeTo(buffer);JSONObject payload=new JSONObject(buffer.readUtf8());
+            assertEquals(provider==AiProvider.DEEPSEEK,payload.has("thinking"));if(provider==AiProvider.DEEPSEEK)assertEquals("disabled",payload.getJSONObject("thinking").getString("type"));
+            assertEquals("json_object",payload.getJSONObject("response_format").getString("type"));assertFalse(payload.has("tools"));
+            assertFalse(payload.toString().contains("private reasoning"));assertNull(captured[0].header("Cookie"));
+        }
+    }
+    @Test public void blankTruncatedAndNonObjectResponsesNeverBecomeSummaries()throws Exception{
+        for(String[] reply:new String[][]{{"   ","stop"},{"{\"x\":1}","length"},{"{}","aborted"},{"{}","insufficient_system_resource"},{"{}","content_filter"},{"[]","stop"},{"{} trailing","stop"},{"```json\n{}\n```","stop"}}){
+            String response=rawEnvelope(reply[0],reply[1]);AtomicInteger attempts=new AtomicInteger();
+            try{AiTransport.requestJson(config(),"Return JSON",SOURCE,new AiTransport.Cancellation(),()->{},request->{attempts.incrementAndGet();return new FakeCall(request,200,response);});fail(Arrays.toString(reply));}catch(IOException|JSONException expected){}
+            assertEquals(1,attempts.get());
+        }
+    }
+    @Test public void validationFailuresCreateNoCallAndProviderErrorsHideDetails()throws Exception{
+        AtomicInteger attempts=new AtomicInteger();Call.Factory calls=request->{attempts.incrementAndGet();return new FakeCall(request,200,"{}");};
+        for(String endpoint:new String[]{"http://api.example.org/v1/chat/completions","https://user:password@api.example.org/chat/completions","https://api.example.org/chat/completions?key=secret"}){
+            try{AiTransport.requestJson(new AiSettings.Config(true,endpoint,"model","test-api-key",1),"Return JSON",SOURCE,new AiTransport.Cancellation(),()->{},calls);fail();}catch(IllegalArgumentException expected){}
+        }
+        char[] oversized=new char[AiPolicy.MAX_CONTEXT_CHARS+1];Arrays.fill(oversized,'x');
+        try{AiTransport.requestJson(config(),"Return JSON",new String(oversized),new AiTransport.Cancellation(),()->{},calls);fail();}catch(IOException expected){assertEquals("SOURCE_LIMIT",expected.getMessage());}
+        try{AiTransport.requestJson(config(),"no structured output instruction",SOURCE,new AiTransport.Cancellation(),()->{},calls);fail();}catch(IOException expected){assertEquals("PROMPT_FORMAT",expected.getMessage());}
+        assertEquals(0,attempts.get());
+        for(int status:new int[]{402,422,500}){
+            try{AiTransport.requestJson(config(),"Return JSON",SOURCE,new AiTransport.Cancellation(),()->{},request->new FakeCall(request,status,"secret-api-key raw response"));fail();}
+            catch(IOException expected){assertFalse(AiTransport.failureMessage(expected).contains("secret-api-key"));assertTrue(AiTransport.failureMessage(expected).contains("没有自动重试"));}
+        }
+    }
+    @Test public void nestedServiceJsonIsRejectedBeforeRecursiveAndroidDecoder()throws Exception{
+        StringBuilder deep=new StringBuilder();for(int i=0;i<64;i++)deep.append('[');deep.append('0');for(int i=0;i<64;i++)deep.append(']');
+        // Both the service envelope and the embedded model result need a pre-parser depth bound.
+        for(String response:new String[]{"{\"choices\":"+deep+"}",rawEnvelope("{\"x\":"+deep+"}","stop"),"{'quoted':'\"','deep':"+deep+"}","{foo\":"+deep+",bar\":0}"}){
+            try{AiTransport.requestJson(config(),"Return JSON",SOURCE,new AiTransport.Cancellation(),()->{},request->new FakeCall(request,200,response));fail();}catch(JSONException expected){}
+        }
+    }
+    @Test public void reasoningWithoutFinalContentIsNeverAccepted()throws Exception{
+        String response=new JSONObject().put("choices",new JSONArray().put(new JSONObject().put("finish_reason","stop").put("message",new JSONObject().put("reasoning_content","{\"evidence\":[]}").put("content",JSONObject.NULL)))).toString();
+        try{AiTransport.requestJson(config(),"Return JSON",SOURCE,new AiTransport.Cancellation(),()->{},request->new FakeCall(request,200,response));fail();}catch(JSONException expected){}
     }
 }

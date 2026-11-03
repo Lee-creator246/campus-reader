@@ -6,8 +6,8 @@ import org.campusreader.notices.SummaryInput;
 
 /** Pure limits and source checks; contains no network or Android dependencies. */
 public final class AiPolicy {
-    public static final int MAX_SOURCE_CHARS=12000,MAX_RESULT_BYTES=16384,MAX_RESPONSE_BYTES=65536,MAX_OUTPUT_TOKENS=1000,DAILY_LIMIT=20;
-    public static final String PROMPT_VERSION="campus-summary-v1";
+    public static final int MAX_SOURCE_CHARS=12000,MAX_CONTEXT_CHARS=22000,MAX_RESULT_BYTES=16384,MAX_RESPONSE_BYTES=65536,MAX_OUTPUT_TOKENS=2000,DAILY_LIMIT=20;
+    public static final String PROMPT_VERSION="campus-evidence-v2-retrieval-1";
     private AiPolicy(){}
     public static String endpoint(String raw){
         if(raw==null||raw.length()>2048)throw new IllegalArgumentException("请填写完整的 HTTPS chat/completions 地址");

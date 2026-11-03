@@ -24,8 +24,14 @@ public final class AiSettings {
     public static final class Config {
         public final boolean enabled;
         public final String endpoint,model,key,configHash;
+        public final AiProvider provider;
         public final long revision;
-        Config(boolean enabled,String endpoint,String model,String key,long revision){this.enabled=enabled;this.endpoint=endpoint;this.model=model;this.key=key;this.revision=revision;this.configHash=AiPolicy.configHash(endpoint,model);}
+        Config(boolean enabled,String endpoint,String model,String key,long revision){this(enabled,endpoint,model,key,revision,AiProvider.CUSTOM);}
+        Config(boolean enabled,String endpoint,String model,String key,long revision,AiProvider provider){
+            if(provider==null)throw new IllegalArgumentException("Missing provider");
+            this.enabled=enabled;this.endpoint=endpoint;this.model=model;this.key=key;this.revision=revision;this.provider=provider;
+            this.configHash=SummaryInput.hash(AiPolicy.configHash(endpoint,model)+"\u0000"+provider.id+"\u0000transport-v2");
+        }
     }
     public AiSettings(Context context,String profile){
         if(profile==null||!(profile.equals("local")||profile.matches("campus:[a-f0-9]{64}")))throw new IllegalArgumentException("Invalid profile");
@@ -35,15 +41,18 @@ public final class AiSettings {
     public Config load(){synchronized(LOCK){
         boolean enabled=prefs.getBoolean("enabled",false);String key="";
         if(enabled){try{key=decrypt();}catch(Exception failure){throw new IllegalStateException("API Key 无法解密，请在设置重新填写；没有发送请求");}}
-        return new Config(enabled,prefs.getString("endpoint",""),prefs.getString("model",""),key,prefs.getLong("revision",0));
+        return new Config(enabled,prefs.getString("endpoint",""),prefs.getString("model",""),key,prefs.getLong("revision",0),provider());
     }}
     public String endpoint(){return prefs.getString("endpoint","");}
     public String model(){return prefs.getString("model","");}
+    public AiProvider provider(){return AiProvider.fromId(prefs.getString("provider",AiProvider.CUSTOM.id));}
     public boolean enabled(){return prefs.getBoolean("enabled",false);}
     public boolean hasKey(){return prefs.contains("encrypted_key");}
-    public void save(boolean enabled,String endpoint,String model,String newKey){synchronized(LOCK){
+    public void save(boolean enabled,String endpoint,String model,String newKey){save(enabled,endpoint,model,newKey,provider());}
+    public void save(boolean enabled,String endpoint,String model,String newKey,AiProvider provider){synchronized(LOCK){
+        if(provider==null)throw new IllegalArgumentException("请选择 AI 服务类型");
         String url=endpoint==null?"":endpoint.trim(),name=model==null?"":model.trim();
-        if(enabled||!url.isEmpty())url=AiPolicy.endpoint(url);
+        if(enabled||!url.isEmpty())url=provider.endpoint(url);
         if(enabled||!name.isEmpty())name=AiPolicy.model(name);
         if(AiPolicy.requiresNewKey(prefs.getString("endpoint",""),url,hasKey(),newKey))throw new IllegalArgumentException("更换 API 地址时须重新填写对应服务的 API Key，或先删除原密钥；不会沿用旧服务密钥");
         SharedPreferences.Editor edit=prefs.edit();
@@ -54,7 +63,7 @@ public final class AiSettings {
                 edit.putString("key_iv",Base64.encodeToString(cipher.getIV(),Base64.NO_WRAP));
             }catch(Exception failure){throw new IllegalStateException("系统安全存储不可用，密钥未保存");}
         }else if(enabled){try{AiPolicy.key(decrypt());}catch(Exception unavailable){throw new IllegalArgumentException("请填写可用的 API Key");}}
-        if(!edit.putBoolean("enabled",enabled).putString("endpoint",url).putString("model",name).putLong("revision",prefs.getLong("revision",0)+1).commit())throw new IllegalStateException("设置未能保存，请重试");
+        if(!edit.putBoolean("enabled",enabled).putString("endpoint",url).putString("model",name).putString("provider",provider.id).putLong("revision",prefs.getLong("revision",0)+1).commit())throw new IllegalStateException("设置未能保存，请重试");
     }}
     public void disable(){synchronized(LOCK){if(!prefs.edit().putBoolean("enabled",false).putLong("revision",prefs.getLong("revision",0)+1).commit())throw new IllegalStateException("设置未保存");}}
     public void invalidateRequests(){synchronized(LOCK){if(!prefs.edit().putLong("revision",prefs.getLong("revision",0)+1).commit())throw new IllegalStateException("未能停止旧摘要请求，请重试");}}

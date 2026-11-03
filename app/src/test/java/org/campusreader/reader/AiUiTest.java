@@ -17,6 +17,7 @@ import org.campusreader.notices.CampusNoticeStore;
 import org.campusreader.notices.NoticeKey;
 import org.campusreader.notices.SummaryInput;
 import org.json.JSONObject;
+import org.json.JSONArray;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -47,17 +48,24 @@ public class AiUiTest {
     /** Keep native SQLite paths short even when Robolectric names its sandbox after a test. */
     public static class ShortPathApplication extends CampusApplication {
         private File databases;
+        private File privateFiles;
         @Override public ShortPathApplication getApplicationContext(){return this;}
         @Override public synchronized File getDatabasePath(String name){
             if(databases==null)try{databases=Files.createTempDirectory("cr-ai-ui-").toFile();}
             catch(IOException failure){throw new AssertionError("Cannot create isolated test database directory",failure);}
             return new File(databases,name);
         }
+        @Override public synchronized File getNoBackupFilesDir(){
+            if(privateFiles==null)try{privateFiles=Files.createTempDirectory("cr-ai-private-").toFile();}
+            catch(IOException failure){throw new AssertionError(failure);}
+            return privateFiles;
+        }
         void dispose(){
             if(databases==null)return;
             File[] files=databases.listFiles();
             if(files!=null)for(File file:files)if(file.isFile())file.delete();
             databases.delete();
+            if(privateFiles!=null){File[] policyFiles=privateFiles.listFiles();if(policyFiles!=null)for(File file:policyFiles)if(file.isFile())file.delete();privateFiles.delete();}
         }
     }
 
@@ -93,21 +101,11 @@ public class AiUiTest {
     }
 
     @Test public void cachedSummaryRemainsReadableWhileOffAndPreservesReadingState()throws Exception{
-        try(CampusNoticeStore store=new CampusNoticeStore(app,"local")){
-            store.upsert(Collections.singletonList(notice("<p>报名志愿活动，11月5日截止。</p>")),100);
-            store.setLater(key,true);
-            SummaryInput input=store.summaryInput(key);
-            JSONObject json=new JSONObject();
-            for(String field:new String[]{"purpose","audience","actions","deadline","location"})
-                json.put(field,new JSONObject().put("value",field.equals("purpose")?"报名志愿活动":"")
-                        .put("quote",field.equals("purpose")?"报名志愿活动":""));
-            assertTrue(store.saveSummaryIfCurrent(key,input.contentHash,input.cacheGeneration,
-                    new AiSettings(app,"local").load().configHash,json.toString(),200));
-        }
+        seedCachedSummary(false);
         AiSummaryActivity activity=openSummary();
         assertNotNull(findText(activity,"合成测试通知"));
-        assertNotNull(findText(activity,"报名志愿活动"));
-        assertNotNull(findText(activity,"原文依据：报名志愿活动"));
+        assertNotNull(findText(activity,"报名志愿活动，11月5日截止。"));
+        assertNotNull(findText(activity,"查看原文依据 · 正文第 1 段"));
         Button generate=(Button)findText(activity,"重新生成（需要再次确认）");
         assertNotNull(generate);assertFalse(generate.isEnabled());
         assertNotNull(findText(activity,"AI 生成已关闭；可在服务设置启用。已有缓存仍可查看。"));
@@ -115,6 +113,47 @@ public class AiUiTest {
             CachedNotice unchanged=store.find(key);assertFalse(unchanged.read);assertTrue(unchanged.later);
             assertEquals(1,store.summaryCount());
         }
+        assertNoAttemptOrCampusConnection();
+    }
+
+    @Test public void acceptingSuggestedTagAppendsAndPreservesManualTagAndReadingFlags()throws Exception{
+        seedCachedSummary(false);AiSummaryActivity activity=openSummary();
+        Button accept=(Button)findText(activity,"采纳标签：志愿实践");assertNotNull(accept);accept.performClick();awaitTask(activity);
+        assertNotNull(findText(activity,"已采纳：志愿实践"));
+        try(CampusNoticeStore store=new CampusNoticeStore(app,"local")){
+            CachedNotice saved=store.find(key);assertFalse(saved.read);assertTrue(saved.later);
+            List<String> names=new ArrayList<>();for(org.campusreader.notices.NoticeTag tag:store.tags(key))names.add(tag.name);
+            assertTrue(names.contains("个人标签"));assertTrue(names.contains("志愿实践"));assertEquals(2,names.size());
+        }
+        assertNoAttemptOrCampusConnection();
+    }
+
+    @Test public void policyReferenceHasSourcePositionsAndIsNotPresentedAsFormalBasis()throws Exception{
+        seedCachedSummary(true);AiSummaryActivity activity=openSummary();
+        assertNotNull(findText(activity,"模型建议关联，适用性待核对；不构成通知正式引用或政策效力判断。"));
+        Button quote=(Button)findText(activity,"核对政策依据 · 第 1 页 · 第 1 段");assertNotNull(quote);quote.performClick();awaitTask(activity);
+        android.app.AlertDialog dialog=ReflectionHelpers.getField(activity,"openEvidenceDialog");assertNotNull(dialog);assertTrue(dialog.isShowing());
+        assertNotNull(findText(dialog.getWindow().getDecorView(),"志愿活动材料提交说明。参加志愿活动需提供申请材料。"));
+        assertNoAttemptOrCampusConnection();
+    }
+
+    @Test public void changingPolicyClearsVisibleCacheAndClosesOpenEvidence()throws Exception{
+        seedCachedSummary(true);AiSummaryActivity activity=openSummary();
+        ((Button)findText(activity,"核对政策依据 · 第 1 页 · 第 1 段")).performClick();awaitTask(activity);
+        android.app.AlertDialog dialog=ReflectionHelpers.getField(activity,"openEvidenceDialog");assertNotNull(dialog);
+        new PolicyLibrary(app,"local").clear();
+        shadowOf(Looper.getMainLooper()).idleFor(500,TimeUnit.MILLISECONDS);awaitTask(activity);
+        assertFalse(dialog.isShowing());assertNull(findText(activity,"采纳标签：志愿实践"));
+        try(CampusNoticeStore store=new CampusNoticeStore(app,"local")){assertEquals(0,store.summaryCount());assertTrue(store.find(key).later);}
+        assertNoAttemptOrCampusConnection();
+    }
+
+    @Test public void changedNoticeCannotApplyOldSuggestedTag()throws Exception{
+        seedCachedSummary(false);AiSummaryActivity activity=openSummary();
+        try(CampusNoticeStore store=new CampusNoticeStore(app,"local")){store.upsert(Collections.singletonList(notice("<p>活动取消，请勿报名。</p>")),300);}
+        ((Button)findText(activity,"采纳标签：志愿实践")).performClick();awaitTask(activity);
+        assertNotNull(findText(activity,"资料已变化或标签未能保存，请返回后重新检查。"));
+        try(CampusNoticeStore store=new CampusNoticeStore(app,"local")){assertEquals(1,store.tags(key).size());assertEquals("个人标签",store.tags(key).get(0).name);}
         assertNoAttemptOrCampusConnection();
     }
 
@@ -134,14 +173,34 @@ public class AiUiTest {
 
     private CampusNotice notice(String body){return new CampusNotice(key,"合成测试通知",10,body,
             "https://portal.example.org/synthetic/notice-1",Collections.emptyList(),Collections.emptyList());}
+    private void seedCachedSummary(boolean policy)throws Exception{
+        PolicyLibrary library=new PolicyLibrary(app,"local");
+        if(policy)library.add(new PolicyLibrary.Metadata("志愿活动办法","合成发布方","测试版","","","全体学生","待核验","合成资料.txt"),
+                Collections.singletonList("志愿活动材料提交说明。参加志愿活动需提供申请材料。"));
+        try(CampusNoticeStore store=new CampusNoticeStore(app,"local")){
+            store.upsert(Collections.singletonList(notice("<p>报名志愿活动，11月5日截止。</p>")),100);store.setLater(key,true);
+            store.addTag(key,store.createTag("个人标签").id);SummaryInput input=store.summaryInput(key);
+            AiEvidence.Snapshot evidence=AiEvidence.build(input,library.snapshot(),Collections.singletonList("个人标签"));
+            JSONObject fields=new JSONObject();for(String name:AiGroundedSummary.FIELDS)fields.put(name,new JSONArray());
+            fields.put("purpose",new JSONArray().put("N2"));
+            JSONArray links=new JSONArray();if(policy){AiEvidence.Unit found=null;for(AiEvidence.Unit unit:evidence.units)if(unit.kind.equals("policy")){found=unit;break;}assertNotNull(found);
+                links.put(new JSONObject().put("notice","N2").put("policy",found.id));}
+            JSONObject raw=new JSONObject().put("schema",2).put("fields",fields).put("tags",new JSONArray().put(new JSONObject().put("name","志愿实践").put("evidence",new JSONArray().put("N2")))).put("policy_links",links);
+            AiGroundedSummary parsed=AiGroundedSummary.parse(raw.toString(),evidence);
+            assertTrue(store.saveSummaryIfCurrent(key,input.contentHash,input.cacheGeneration,evidence.cacheHash(new AiSettings(app,"local").load().configHash),parsed.json,200));
+        }
+    }
     private AiSummaryActivity openSummary()throws Exception{
         Intent intent=new Intent(app,AiSummaryActivity.class).putExtra(AiSummaryActivity.EXTRA_PROFILE,"local")
                 .putExtra(AiSummaryActivity.EXTRA_SOURCE,key.source).putExtra(AiSummaryActivity.EXTRA_STABLE_ID,key.stableId);
         ActivityController<AiSummaryActivity> opened=Robolectric.buildActivity(AiSummaryActivity.class,intent).setup();
         controller=opened;AiSummaryActivity activity=opened.get();assertFalse(activity.isFinishing());
-        Future<?> load=ReflectionHelpers.getField(activity,"task");assertNotNull(load);load.get(5,TimeUnit.SECONDS);
+        awaitTask(activity);return activity;
+    }
+    private void awaitTask(AiSummaryActivity activity)throws Exception{
+        Future<?> load=ReflectionHelpers.getField(activity,"task");assertNotNull(load);load.get(10,TimeUnit.SECONDS);
         // Drain only currently due work; the lifecycle monitor intentionally reschedules after 500 ms.
-        shadowOf(Looper.getMainLooper()).idle();return activity;
+        shadowOf(Looper.getMainLooper()).idle();
     }
     private void assertNoAttemptOrCampusConnection(){
         AiSettings settings=new AiSettings(app,"local");assertFalse(settings.enabled());assertEquals(0,settings.usedToday());

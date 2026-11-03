@@ -9,6 +9,8 @@
 | jsoup 1.23.2 | Gradle 从 Maven Central 下载，适用 [上游 MIT 许可证](https://github.com/jhy/jsoup/blob/master/LICENSE) |
 | OkHttp 4.12.0 | AI 独立 HTTP 客户端，Gradle 从 Maven Central 获取；适用 [Apache-2.0 许可证](https://github.com/square/okhttp/blob/parent-4.12.0/LICENSE.txt)，版本与依赖见 [发布 POM](https://repo.maven.apache.org/maven2/com/squareup/okhttp3/okhttp/4.12.0/okhttp-4.12.0.pom) |
 | Okio / Kotlin 标准库 | OkHttp 的运行时传递依赖，保留 [Okio Apache-2.0 许可证](https://github.com/square/okio/blob/master/LICENSE.txt)及 [Kotlin Apache-2.0 许可证](https://github.com/JetBrains/kotlin/blob/master/license/LICENSE.txt)；最终版本以 Gradle 解析结果为准 |
+| PDFBox-Android 2.0.27.0 | 在本机提取用户选择的 PDF 文字；Gradle 从 Maven Central 获取，适用 [上游 Apache-2.0 许可证及第三方说明](https://github.com/TomRoush/PdfBox-Android)。不使用联网文档解析服务，不执行 PDF 脚本或附件 |
+| Bouncy Castle bcprov / bcpkix / bcutil jdk15to18 1.86 | PDFBox 的加密支持依赖，显式统一到 1.86，替代其默认 1.72；Gradle 从 Maven Central 获取，适用 [Bouncy Castle License](https://www.bouncycastle.org/licence.html)，按 MIT 许可理解。不提供校园认证协议或预置凭据 |
 | Robolectric 4.17 | 仅用于本地测试，不打包进 App；[上游许可](https://github.com/robolectric/robolectric/blob/robolectric-4.17/LICENSE)为 MIT，并注明部分 Android 来源文件适用 Apache-2.0 |
 | JUnit 4.13.2 | 仅用于测试，不打包进 App；适用 [Eclipse Public License 1.0](https://github.com/junit-team/junit4/blob/r4.13.2/LICENSE-junit.txt) |
 | Sangfor SDK | 专有外部依赖，仅提供本项目编写的适配代码，不收录 AAR、SO、厂商文档或 Demo；使用者自行获取使用授权 |

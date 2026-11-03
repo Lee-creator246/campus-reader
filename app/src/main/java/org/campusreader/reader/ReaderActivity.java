@@ -298,6 +298,7 @@ public class ReaderActivity extends Activity {
         drawerItem(drawerPanel,"settings","关键词规则",false,()->openKeywordRules());
         drawerItem(drawerPanel,"refresh","刷新与提醒记录",false,()->startActivity(new Intent(this,NotificationHistoryActivity.class).putExtra(NotificationHistoryActivity.EXTRA_PROFILE,profile)));
         drawerItem(drawerPanel,"summary","AI 摘要服务",false,()->startActivity(new Intent(this,AiSettingsActivity.class).putExtra(AiSettingsActivity.EXTRA_PROFILE,profile)));
+        drawerItem(drawerPanel,"book","政策资料库",false,()->startActivity(new Intent(this,PolicyLibraryActivity.class).putExtra("profile",profile)));
         drawerSection(drawerPanel,"订阅");drawerItem(drawerPanel,"feed","校内通知",CampusPortalParser.SOURCE.equals(source)&&filter!=2&&!priorityOnly&&libraryFilter.tags.isEmpty()&&!sourceTitle.equals("全部校内通知"),()->selectSource(CampusPortalParser.SOURCE,"校内通知",0));for(Subscription subItem:subscriptions)drawerItem(drawerPanel,"feed",subItem.title,RssParser.source(subItem.url).equals(source),()->selectSource(RssParser.source(subItem.url),subItem.title,0));drawerItem(drawerPanel,"link","添加 / 管理订阅",false,()->subscriptionMenu());
         drawerSection(drawerPanel,"标签");LinearLayout tagsPanel=column();drawerPanel.addView(tagsPanel);drawerItem(drawerPanel,"tag","管理标签",false,()->manageTags());
         drawerSection(drawerPanel,"校园访问");connectionStatus=text("",12,MUTED);connectionStatus.setPadding(dp(16),0,dp(16),dp(8));drawerPanel.addView(connectionStatus);

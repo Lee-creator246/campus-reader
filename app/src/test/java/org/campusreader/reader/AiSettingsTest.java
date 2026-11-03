@@ -30,4 +30,24 @@ public class AiSettingsTest {
         prefs.edit().putBoolean("enabled",true).putString("endpoint","https://api.example.org/v1/chat/completions").putString("model","model").commit();AiSettings.Config snapshot=settings.load();assertTrue(settings.reserve(snapshot));
         settings.invalidateRequests();assertFalse(settings.isCurrent(snapshot));assertEquals(1,settings.usedToday());settings.save(false,settings.endpoint(),settings.model(),"");assertEquals(1,settings.usedToday());
     }
+    @Test public void providerSelectionPersistsWithoutEnablingOrCreatingKey(){
+        settings.save(false,AiProvider.DEEPSEEK.defaultEndpoint,AiProvider.DEEPSEEK.defaultModel,"",AiProvider.DEEPSEEK);
+        AiSettings.Config saved=settings.load();assertFalse(saved.enabled);assertFalse(settings.hasKey());assertEquals(AiProvider.DEEPSEEK,saved.provider);
+        assertEquals(AiProvider.DEEPSEEK.defaultModel,saved.model);assertEquals(0,settings.usedToday());
+    }
+    @Test public void oldSettingsMigrateToCustomWithoutSecretOrNetworkChanges(){
+        prefs.edit().putString("endpoint","https://models.example.org/v1/chat/completions").putString("model","my-model").commit();
+        assertEquals(AiProvider.CUSTOM,settings.provider());assertEquals("my-model",settings.load().model);assertFalse(prefs.contains("provider"));
+    }
+    @Test public void selectingDeepSeekCannotCarryPreviousDestinationKey(){
+        prefs.edit().putString("endpoint","https://models.example.org/v1/chat/completions").putString("encrypted_key","synthetic-ciphertext").putString("key_iv","synthetic-iv").commit();
+        try{settings.save(false,AiProvider.DEEPSEEK.defaultEndpoint,AiProvider.DEEPSEEK.defaultModel,"",AiProvider.DEEPSEEK);fail();}catch(IllegalArgumentException expected){}
+        assertEquals(AiProvider.CUSTOM,settings.provider());assertEquals("https://models.example.org/v1/chat/completions",settings.endpoint());
+        assertEquals("synthetic-ciphertext",prefs.getString("encrypted_key",""));assertEquals(0,prefs.getLong("revision",0));
+    }
+    @Test public void invalidDeepSeekDestinationLeavesSavedConfigurationUntouched(){
+        settings.save(false,AiProvider.DEEPSEEK.defaultEndpoint,AiProvider.DEEPSEEK.defaultModel,"",AiProvider.DEEPSEEK);long revision=settings.load().revision;
+        try{settings.save(false,"https://evil.example.org/chat/completions","model","",AiProvider.DEEPSEEK);fail();}catch(IllegalArgumentException expected){}
+        assertEquals(AiProvider.DEEPSEEK.defaultEndpoint,settings.endpoint());assertEquals(revision,settings.load().revision);
+    }
 }

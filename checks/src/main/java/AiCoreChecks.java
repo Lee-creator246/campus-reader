@@ -34,7 +34,7 @@ public final class AiCoreChecks {
         rejects(()->AiPolicy.sentText(new SummaryInput("通知",new String(huge))),"Long article silently truncated or sent");
         rejects(()->AiPolicy.model("model\nInjected: header"),"Control in model accepted");
         rejects(()->AiPolicy.key("secret\nInjected: header"),"Control in API key accepted");
-        check(AiPolicy.MAX_OUTPUT_TOKENS==1000&&AiPolicy.DAILY_LIMIT==20,"Billing bounds changed");
+        check(AiPolicy.MAX_OUTPUT_TOKENS==2000&&AiPolicy.DAILY_LIMIT==20,"Billing bounds changed");
         System.out.println("AI core checks passed: "+checked);
     }
 }
