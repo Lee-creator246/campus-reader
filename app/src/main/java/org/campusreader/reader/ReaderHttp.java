@@ -28,12 +28,19 @@ final class ReaderHttp {
             try{return new String(bytes,Charset.forName(encoding));}catch(Exception e){return new String(bytes,Charset.forName("UTF-8"));}
         }
     }
-    static Response get(String address,int byteLimit,boolean campusOnly) throws IOException {
+    static final class RequestGuard {
+        private final String profile;private final boolean campusOnly;private final Thread owner;
+        private final java.util.function.BooleanSupplier cancelled;
+        RequestGuard(String profile,boolean campusOnly,Thread owner,java.util.function.BooleanSupplier cancelled){this.profile=profile;this.campusOnly=campusOnly;this.owner=owner;this.cancelled=cancelled;}
+        void check()throws IOException{if(owner.isInterrupted()||cancelled.getAsBoolean())throw new IOException("Request cancelled");if(campusOnly)requireCampusSession(profile);}
+    }
+    static Response get(String address,int byteLimit,boolean campusOnly)throws IOException{return get(address,byteLimit,campusOnly,()->false);}
+    static Response get(String address,int byteLimit,boolean campusOnly,java.util.function.BooleanSupplier cancelled) throws IOException {
         String profile=campusOnly?MediaActions.activeProfile():"";
-        if(campusOnly)requireCampusSession(profile);
+        RequestGuard guard=new RequestGuard(profile,campusOnly,Thread.currentThread(),cancelled);guard.check();
         URL current=checked(address,campusOnly);
         for(int redirects=0;redirects<=5;redirects++) {
-            if(campusOnly)requireCampusSession(profile);
+            guard.check();
             current=checked(current.toString(),campusOnly);
             HttpURLConnection connection=(HttpURLConnection)current.openConnection();
             try {
@@ -41,15 +48,17 @@ final class ReaderHttp {
                 connection.setInstanceFollowRedirects(false); connection.setRequestProperty("User-Agent",USER_AGENT);
                 connection.setRequestProperty("Accept-Encoding","identity");
                 if(campusOnly) {
-                    requireCampusSession(profile);
+                    guard.check();
+                    connection.setUseCaches(false);
+                    connection.setRequestProperty("Cache-Control","no-cache");
                     String cookie=CookieManager.getInstance().getCookie(current.toString());
                     if(cookie!=null&&!cookie.isEmpty()) connection.setRequestProperty("Cookie",cookie);
                 }
                 int status=connection.getResponseCode();
-                if(campusOnly)requireCampusSession(profile);
+                guard.check();
                 if(campusOnly) for(Map.Entry<String,List<String>> h:connection.getHeaderFields().entrySet())
                     if("set-cookie".equalsIgnoreCase(h.getKey())) for(String value:h.getValue()) {
-                        requireCampusSession(profile);CookieManager.getInstance().setCookie(current.toString(),value);
+                        persistCookie(guard,current.toString(),value);
                     }
                 String mime=connection.getContentType(); if(mime==null) mime="";
                 if(status==301||status==302||status==303||status==307||status==308) {
@@ -67,8 +76,8 @@ final class ReaderHttp {
                 if(input==null) return new Response(current.toString(),status,mime,new byte[0]);
                 try(InputStream stream=input; ByteArrayOutputStream output=new ByteArrayOutputStream()) {
                     byte[] buffer=new byte[8192]; int count,total=0;
-                    while((count=stream.read(buffer))!=-1) {total+=count;if(total>byteLimit)throw new IOException("Response exceeds size limit");output.write(buffer,0,count);}
-                    if(campusOnly)requireCampusSession(profile);
+                    while((count=stream.read(buffer))!=-1) {guard.check();total+=count;if(total>byteLimit)throw new IOException("Response exceeds size limit");output.write(buffer,0,count);}
+                    guard.check();
                     return new Response(current.toString(),status,mime,output.toByteArray());
                 }
             } finally {connection.disconnect();}
@@ -79,6 +88,21 @@ final class ReaderHttp {
         if(!CampusConfiguration.isConfigured())throw new MediaSafety.Rejected("ACCOUNT_CHANGED");
         if(!profile.startsWith("campus:")||!MediaActions.currentProfile(profile))throw new MediaSafety.Rejected("ACCOUNT_CHANGED");
         if(!CampusApplication.auth().isAccessReady())throw new MediaSafety.Rejected("CAMPUS_OFFLINE");
+    }
+    /** Await the WebView cookie write before following a renewal redirect or issuing another request. */
+    static void persistCookie(RequestGuard guard,String url,String value)throws IOException {
+        if(android.os.Looper.myLooper()==android.os.Looper.getMainLooper())throw new IOException("Cookie update requires worker thread");
+        java.util.concurrent.CountDownLatch done=new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicReference<IOException> failed=new java.util.concurrent.atomic.AtomicReference<>();
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(()->{
+            try{guard.check();CookieManager.getInstance().setCookie(url,value,accepted->{
+                // Rejected expiry/deletion cookies are not a reason to copy cookie values elsewhere.
+                done.countDown();
+            });}catch(Exception error){failed.set(new IOException("Cookie update unavailable"));done.countDown();}
+        });
+        try{if(!done.await(5,java.util.concurrent.TimeUnit.SECONDS))throw new IOException("Cookie update timed out");}
+        catch(InterruptedException interrupted){Thread.currentThread().interrupt();throw new IOException("Cookie update cancelled");}
+        if(failed.get()!=null)throw failed.get();guard.check();CookieManager.getInstance().flush();
     }
     static boolean isCampus(String value) {return CampusSite.allowsPortalUrl(value);}
     static URL checked(String value,boolean campusOnly) throws IOException {

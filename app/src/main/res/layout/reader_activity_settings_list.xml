@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Project-authored layout, MIT. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="#FFFFFF">
-    <LinearLayout android:layout_width="match_parent" android:layout_height="56dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="12dp" android:paddingEnd="12dp">
-        <TextView android:layout_width="wrap_content" android:layout_height="48dp" android:id="@+id/reader_text_action_bar_left" android:text="返回" android:textSize="14sp" android:textColor="#202124" android:gravity="center" android:padding="8dp" android:visibility="gone" />
-        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:id="@+id/reader_text_action_bar_title" android:text="设置" android:textSize="20sp" android:textColor="#202124" android:layout_weight="1" android:gravity="center_vertical" />
-        <TextView android:layout_width="wrap_content" android:layout_height="48dp" android:id="@+id/reader_text_action_bar_done" android:text="保存" android:textSize="14sp" android:textColor="#202124" android:gravity="center" android:padding="8dp" />
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="@color/reader_surface">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="64dp" android:gravity="center_vertical" android:orientation="horizontal" android:paddingStart="12dp" android:paddingEnd="12dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="48dp" android:id="@+id/reader_text_action_bar_left" android:minWidth="48dp" android:focusable="true" android:background="?android:attr/selectableItemBackground" android:text="返回" android:textSize="14sp" android:textColor="@color/reader_ink" android:gravity="center" android:padding="8dp" android:visibility="gone" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:id="@+id/reader_text_action_bar_title" android:text="设置" android:textSize="20sp" android:textColor="@color/reader_ink" android:layout_weight="1" android:gravity="center_vertical" />
+        <TextView android:layout_width="wrap_content" android:layout_height="48dp" android:id="@+id/reader_text_action_bar_done" android:minWidth="48dp" android:focusable="true" android:background="?android:attr/selectableItemBackground" android:text="保存" android:textSize="14sp" android:textColor="@color/reader_ink" android:gravity="center" android:padding="8dp" />
     </LinearLayout>
     <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:id="@+id/reader_ll_container" android:orientation="vertical" />

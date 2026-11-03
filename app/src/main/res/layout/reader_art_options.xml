@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Project-authored layout, MIT. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp" android:background="#FFFFFF">
-    <TextView android:layout_width="match_parent" android:layout_height="48dp" android:id="@+id/reader_all_txt" android:text="全部通知" android:textSize="16sp" android:textColor="#202124" android:gravity="center_vertical" android:paddingStart="12dp" />
-    <TextView android:layout_width="match_parent" android:layout_height="48dp" android:id="@+id/reader_unread_txt" android:text="仅未读" android:textSize="16sp" android:textColor="#202124" android:gravity="center_vertical" android:paddingStart="12dp" />
-    <TextView android:layout_width="match_parent" android:layout_height="48dp" android:id="@+id/reader_star_txt" android:text="稍后读" android:textSize="16sp" android:textColor="#202124" android:gravity="center_vertical" android:paddingStart="12dp" />
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp" android:background="@color/reader_surface">
+    <TextView android:layout_width="match_parent" android:layout_height="48dp" android:id="@+id/reader_all_txt" android:text="全部通知" android:textSize="16sp" android:textColor="@color/reader_ink" android:gravity="center_vertical" android:paddingStart="12dp" />
+    <TextView android:layout_width="match_parent" android:layout_height="48dp" android:id="@+id/reader_unread_txt" android:text="仅未读" android:textSize="16sp" android:textColor="@color/reader_ink" android:gravity="center_vertical" android:paddingStart="12dp" />
+    <TextView android:layout_width="match_parent" android:layout_height="48dp" android:id="@+id/reader_star_txt" android:text="稍后读" android:textSize="16sp" android:textColor="@color/reader_ink" android:gravity="center_vertical" android:paddingStart="12dp" />
     <LinearLayout android:layout_width="match_parent" android:layout_height="56dp" android:orientation="horizontal">
-        <TextView android:layout_width="0dp" android:layout_height="48dp" android:id="@+id/reader_list_button" android:text="列表" android:textSize="14sp" android:textColor="#202124" android:layout_weight="1" android:gravity="center" />
-        <TextView android:layout_width="0dp" android:layout_height="48dp" android:id="@+id/reader_magazine_button" android:text="杂志" android:textSize="14sp" android:textColor="#202124" android:layout_weight="1" android:gravity="center" />
-        <TextView android:layout_width="0dp" android:layout_height="48dp" android:id="@+id/reader_card_button" android:text="卡片" android:textSize="14sp" android:textColor="#202124" android:layout_weight="1" android:gravity="center" />
+        <TextView android:layout_width="0dp" android:layout_height="48dp" android:id="@+id/reader_list_button" android:text="列表" android:textSize="14sp" android:textColor="@color/reader_ink" android:layout_weight="1" android:gravity="center" />
+        <TextView android:layout_width="0dp" android:layout_height="48dp" android:id="@+id/reader_magazine_button" android:text="杂志" android:textSize="14sp" android:textColor="@color/reader_ink" android:layout_weight="1" android:gravity="center" />
+        <TextView android:layout_width="0dp" android:layout_height="48dp" android:id="@+id/reader_card_button" android:text="卡片" android:textSize="14sp" android:textColor="@color/reader_ink" android:layout_weight="1" android:gravity="center" />
     </LinearLayout>
-    <TextView android:layout_width="match_parent" android:layout_height="48dp" android:id="@+id/reader_item_settings" android:text="搜索与筛选" android:textSize="14sp" android:textColor="#202124" android:gravity="center_vertical" android:paddingStart="12dp" />
+    <TextView android:layout_width="match_parent" android:layout_height="48dp" android:id="@+id/reader_item_settings" android:text="搜索与筛选" android:textSize="14sp" android:textColor="@color/reader_ink" android:gravity="center_vertical" android:paddingStart="12dp" />
 </LinearLayout>

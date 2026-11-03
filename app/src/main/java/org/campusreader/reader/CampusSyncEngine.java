@@ -77,7 +77,7 @@ public final class CampusSyncEngine {
             }
             CampusPortalParser parser=new CampusPortalParser();
             try {
-                ReaderHttp.Response response=ReaderHttp.get(request==null?CampusSite.portalListUrl():request.url(),5*1024*1024,true);
+                ReaderHttp.Response response=ReaderHttp.get(request==null?CampusSite.portalListUrl():request.url(),5*1024*1024,true,()->check(profile,generation,prefs,cancel,deadline)!=null);
                 guard=check(profile,generation,prefs,cancel,deadline);
                 if(guard!=null)return result(guard,profile,0,0,0,0,request);
                 CampusPortalParser.Page page=request==null?parser.parseList(response.url,response.status,response.text()):parser.parseMore(response.url,response.status,response.text(),request);
@@ -90,7 +90,7 @@ public final class CampusSyncEngine {
                     try {
                         CampusNotice listing=new CampusNotice(summary.key,summary.title,summary.publishedAtMillis,"",summary.originalUrl,Collections.emptyList(),Collections.emptyList());
                         NoticeRefreshPlan.Content content=NoticeRefreshPlan.resolve(store.find(summary.key),listing,()->{
-                            ReaderHttp.Response detail=ReaderHttp.get(summary.originalUrl,5*1024*1024,true);
+                            ReaderHttp.Response detail=ReaderHttp.get(summary.originalUrl,5*1024*1024,true,()->check(profile,generation,prefs,cancel,deadline)!=null);
                             return parser.parseDetail(detail.url,detail.status,detail.text()).notice;
                         });
                         CampusNotice notice=content.notice;

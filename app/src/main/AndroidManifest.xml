@@ -21,6 +21,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".PortalLoginActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".ReaderSettingsActivity" android:exported="false" />
         <activity android:name=".KeywordRulesActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".RulePreviewActivity" android:exported="false" />

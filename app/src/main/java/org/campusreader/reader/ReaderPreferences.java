@@ -11,6 +11,10 @@ public final class ReaderPreferences {
     private final Context context;
     public ReaderPreferences(Context context) { this.context=context.getApplicationContext();prefs=this.context.getSharedPreferences("reader-settings",Context.MODE_PRIVATE); }
     public boolean isBackgroundEnabled(){return prefs.getBoolean("background",true);}
+    public boolean isRefreshOnOpen(){return prefs.getBoolean("refreshOnOpen",true);}
+    public void setRefreshOnOpen(boolean value){prefs.edit().putBoolean("refreshOnOpen",value).apply();}
+    public boolean isPortalAutoRestoreEnabled(){return prefs.getBoolean("portalAutoRestore",true);}
+    public void setPortalAutoRestoreEnabled(boolean value){prefs.edit().putBoolean("portalAutoRestore",value).apply();}
     public void setBackgroundEnabled(boolean value){prefs.edit().putBoolean("background",value).apply();}
     public int getIntervalMinutes(){return SyncGate.intervalMinutes(prefs.getInt("interval",60));}
     public void setIntervalMinutes(int value){prefs.edit().putInt("interval",SyncGate.intervalMinutes(value)).apply();}

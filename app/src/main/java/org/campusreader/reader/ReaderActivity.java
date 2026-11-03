@@ -24,7 +24,7 @@ import org.json.*;
 
 /** Native reader presentation bound to the local campus repository. */
 public class ReaderActivity extends Activity {
-    private static final int AUTH=100, CONFIG=101, BLUE=ReaderUi.BLUE, INK=ReaderUi.INK, MUTED=ReaderUi.MUTED;
+    private static final int AUTH=100, CONFIG=101, PORTAL=102, BLUE=ReaderUi.BLUE, INK=ReaderUi.INK, MUTED=ReaderUi.MUTED;
     private SyncGate.Lease configurationLease;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private final ExecutorService network=Executors.newSingleThreadExecutor();
@@ -39,6 +39,7 @@ public class ReaderActivity extends Activity {
     private TextView priorityCount;
     private String profile,source=CampusPortalParser.SOURCE,sourceTitle="校内通知";
     private volatile int generation=0;
+    private volatile long foregroundRequestGeneration;
     private int filter=0,visibleLimit=100;
     private boolean busy=false,detailVisible=false,clearingSession=false,attemptedAutoRefresh=false;
     private long refreshSequence;
@@ -47,7 +48,8 @@ public class ReaderActivity extends Activity {
     private boolean resumed=false,lastAccessReady=false,portalVerified=false,portalPrompted=false;
     private final DeferredPortalRefresh deferredPortalRefresh=new DeferredPortalRefresh();
     private final Handler mainHandler=new Handler(Looper.getMainLooper());
-    private AlertDialog portalDialog;
+    private boolean portalLoginInFlight;
+    private long pausedAt;
     private final Runnable readiness=new Runnable(){@Override public void run(){
         if(!resumed)return;
         boolean ready=CampusApplication.auth().isAccessReady();
@@ -83,7 +85,7 @@ public class ReaderActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().setStatusBarColor(Color.WHITE);
+        getWindow().setStatusBarColor(ReaderUi.SURFACE);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         preferences=getSharedPreferences("reader-local",MODE_PRIVATE);
         viewMode=preferences.getString("reader-view-mode",preferences.getBoolean("reader-card-style",true)?"magazine":"list");
@@ -105,13 +107,14 @@ public class ReaderActivity extends Activity {
                 .setCancelable(false).setPositiveButton("关闭应用",(dialog,which)->closeForConfiguration()).show();
             return;
         }
+        if(pausedAt>0&&android.os.SystemClock.elapsedRealtime()-pausedAt>=60_000L){attemptedAutoRefresh=false;portalPrompted=false;}
         resumed=true;mainHandler.removeCallbacks(readiness);mainHandler.post(readiness);
         applyAccount();
         KeywordRules updated=KeywordRules.load(this,profile);boolean changed=!updated.fingerprint().equals(keywordRules.fingerprint());keywordRules=updated;
         if(changed){generation++;savedListPosition=0;savedListTop=0;if(!detailVisible){showList();return;}}
         if(!detailVisible)loadCache();
     }
-    @Override protected void onPause(){resumed=false;mainHandler.removeCallbacks(readiness);super.onPause();}
+    @Override protected void onPause(){foregroundRequestGeneration++;pausedAt=android.os.SystemClock.elapsedRealtime();resumed=false;mainHandler.removeCallbacks(readiness);super.onPause();}
     private void applyAccount() {
         String account=CampusApplication.auth().getProfileId();
         if(CampusApplication.auth().isAccessReady()&&account!=null&&!account.trim().isEmpty()) {
@@ -128,6 +131,12 @@ public class ReaderActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int result,Intent data) {
         super.onActivityResult(request,result,data);
+        if(request==PORTAL){
+            portalLoginInFlight=false;
+            if(result==RESULT_OK&&data!=null)refreshAfterPortalLogin(data.getStringExtra(PortalLoginActivity.EXTRA_PROFILE));
+            else message("门户恢复未完成，缓存可继续阅读；可从侧栏重新登录。");
+            return;
+        }
         if(request==CONFIG){
             if(configurationLease!=null){configurationLease.close();configurationLease=null;}
             if(result==RESULT_FIRST_USER){closeForConfiguration();return;}
@@ -181,13 +190,13 @@ public class ReaderActivity extends Activity {
         toolbar.getMenu().add(0,2,1,"搜索通知").setIcon(ReaderUi.icon(this,"search",INK)).setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
         toolbar.getMenu().add(0,3,2,"标为已读").setIcon(ReaderUi.icon(this,"check",INK)).setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
         toolbar.setOnMenuItemClickListener(item->{if(item.getItemId()==1)showReadingMenu(toolbar);else if(item.getItemId()==2)toggleSearch();else markDisplayedRead();return true;});
-        FrameLayout frame=findViewById(R.id.reader_main_content);LinearLayout root=column();root.setBackgroundColor(Color.WHITE);frame.addView(root,new FrameLayout.LayoutParams(-1,-1));
-        LinearLayout searchRow=row();searchRow.setPadding(dp(16),0,dp(8),0);searchRow.setBackgroundColor(Color.WHITE);
+        FrameLayout frame=findViewById(R.id.reader_main_content);LinearLayout root=column();root.setBackgroundColor(ReaderUi.SURFACE);frame.addView(root,new FrameLayout.LayoutParams(-1,-1));
+        LinearLayout searchRow=row();searchRow.setPadding(dp(16),0,dp(8),0);searchRow.setBackgroundColor(ReaderUi.SURFACE);
         searchInput=new EditText(this);searchInput.setSingleLine(true);searchInput.setTextSize(16);searchInput.setHint("搜索标题及缓存正文");searchInput.setTextColor(INK);searchInput.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);searchInput.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(256)});searchInput.setText(libraryFilter.search);searchRow.addView(searchInput,new LinearLayout.LayoutParams(0,dp(48),1));
         searchRow.addView(icon("close","清空并收起搜索",v->{searchInput.setText("");searchRow.setVisibility(View.GONE);hideKeyboard();}),new LinearLayout.LayoutParams(dp(48),dp(48)));searchRow.setVisibility(libraryFilter.search.isEmpty()?View.GONE:View.VISIBLE);root.addView(searchRow);
         searchInput.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence t,int start,int count,int after){}public void onTextChanged(CharSequence t,int start,int before,int count){if(pendingSearch!=null)mainHandler.removeCallbacks(pendingSearch);final String value=t.toString().trim();pendingSearch=()->{libraryFilter.search=value;libraryFilter.save(preferences,profile);generation++;savedListPosition=0;savedListTop=0;loadCache();};mainHandler.postDelayed(pendingSearch,250);}public void afterTextChanged(android.text.Editable text){}});
         searchInput.setOnEditorActionListener((v,action,event)->{hideKeyboard();return true;});
-        list=new ListView(this);list.setBackgroundColor(Color.WHITE);list.setClipToPadding(false);list.setDivider(new android.graphics.drawable.ColorDrawable(ReaderUi.LINE));list.setDividerHeight(dp(1));list.setSelector(new android.graphics.drawable.ColorDrawable(0xffedf3fb));
+        list=new ListView(this);list.setBackgroundColor(ReaderUi.SURFACE);list.setClipToPadding(false);list.setDivider(new android.graphics.drawable.ColorDrawable(ReaderUi.LINE));list.setDividerHeight(dp(1));list.setSelector(new android.graphics.drawable.ColorDrawable(0xffedf3fb));
         LinearLayout footer=column();footer.setPadding(dp(16),dp(12),dp(16),dp(12));heading=text("",12,MUTED);heading.setGravity(Gravity.CENTER);footer.addView(heading);more=button("加载更多",v->loadMoreNotices());footer.addView(more,new LinearLayout.LayoutParams(-1,dp(48)));list.addFooterView(footer,null,false);
         adapter=new NoticeAdapter();list.setAdapter(adapter);listScope=scope();
         LinearLayout empty=column();empty.setGravity(Gravity.CENTER);empty.setPadding(dp(28),dp(24),dp(28),dp(24));emptyTitle=text("",20,INK);emptyTitle.setGravity(Gravity.CENTER);empty.addView(emptyTitle);emptyHint=text("",14,MUTED);emptyHint.setGravity(Gravity.CENTER);emptyHint.setPadding(0,dp(12),0,dp(18));empty.addView(emptyHint);emptyAction=button("",null);empty.addView(emptyAction,new LinearLayout.LayoutParams(-2,dp(48)));
@@ -196,7 +205,7 @@ public class ReaderActivity extends Activity {
         swipeRefresh=new SwipeRefreshLayout(this);swipeRefresh.setColorSchemeColors(BLUE);swipeRefresh.addView(content);swipeRefresh.setOnChildScrollUpCallback((parent,child)->list.canScrollVertically(-1));swipeRefresh.setOnRefreshListener(()->{if(!busy){refresh(false);updateBusy();}else swipeRefresh.setRefreshing(true);});root.addView(swipeRefresh,new LinearLayout.LayoutParams(-1,0,1));
         list.setOnItemClickListener((p,v,pos,id)->{if(pos<rows.size()){rememberListPosition();openNotice(rows.get(pos).content.key);}});list.setOnItemLongClickListener((p,v,pos,id)->{if(pos>=rows.size())return false;rowActions(rows.get(pos));return true;});
         View drawerHost=findViewById(R.id.reader_drawer_content);if(drawerHost instanceof ScrollView)drawerScroll=(ScrollView)drawerHost;else{drawerScroll=new ScrollView(this);((android.view.ViewGroup)drawerHost).addView(drawerScroll);}
-        drawerPanel=column();drawerPanel.setBackgroundColor(Color.WHITE);drawerScroll.addView(drawerPanel);populateDrawer();
+        drawerPanel=column();drawerPanel.setBackgroundColor(ReaderUi.SURFACE);drawerScroll.addView(drawerPanel);populateDrawer();
         nativeDrawer.addDrawerListener(new DrawerLayout.SimpleDrawerListener(){@Override public void onDrawerOpened(View view){hideKeyboard();populateDrawer();}@Override public void onDrawerSlide(View view,float offset){if(offset>0)hideKeyboard();}});
         refresh=null;syncProgress=null;restoreListPending=true;updateBusy();updateConnectionStatus();loadCache();
     }
@@ -226,7 +235,7 @@ public class ReaderActivity extends Activity {
     private void showPriority(){priorityOnly=true;source=CampusPortalParser.SOURCE;sourceTitle="重点关注";filter=0;libraryFilter=new ReaderFilterState();libraryFilter.save(preferences,profile);visibleLimit=100;nextPage=null;generation++;showList();}
     private void showReadingMenu(View anchor){
         View options=getLayoutInflater().inflate(R.layout.reader_art_options,null);
-        PopupWindow popup=new PopupWindow(options,Math.min(dp(308),getResources().getDisplayMetrics().widthPixels-dp(24)),-2,true);popup.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.WHITE));popup.setElevation(dp(8));popup.setOutsideTouchable(true);
+        PopupWindow popup=new PopupWindow(options,Math.min(dp(308),getResources().getDisplayMetrics().widthPixels-dp(24)),-2,true);popup.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(ReaderUi.SURFACE));popup.setElevation(dp(8));popup.setOutsideTouchable(true);
         int[] filters={R.id.reader_all_txt,R.id.reader_unread_txt,R.id.reader_star_txt};for(int i=0;i<filters.length;i++){final int index=i;TextView choice=options.findViewById(filters[i]);choice.setTextColor(filter==i?BLUE:INK);choice.setBackgroundColor(filter==i?0xffeaf1ff:Color.TRANSPARENT);choice.setOnClickListener(v->{popup.dismiss();filter=index;generation++;showList();});}
         int[] modes={R.id.reader_list_button,R.id.reader_magazine_button,R.id.reader_card_button};String[] modeNames={"list","magazine","card"};for(int i=0;i<modes.length;i++){final String mode=modeNames[i];View choice=options.findViewById(modes[i]);choice.setSelected(viewMode.equals(mode));choice.setBackgroundColor(viewMode.equals(mode)?0xffeaf1ff:Color.TRANSPARENT);choice.setOnClickListener(v->{popup.dismiss();setViewMode(mode);});}
         options.findViewById(R.id.reader_item_settings).setOnClickListener(v->{popup.dismiss();showLocalReadingActions();});
@@ -276,7 +285,7 @@ public class ReaderActivity extends Activity {
     }
     private void drawerSection(LinearLayout panel,String value){TextView label=text(value,12,MUTED);label.setPadding(dp(16),dp(20),dp(16),dp(8));panel.addView(label);}
     private TextView drawerItem(LinearLayout panel,String image,String value,boolean selected,Runnable action){
-        View item=getLayoutInflater().inflate(R.layout.reader_item_list_group,panel,false);ImageView symbol=item.findViewById(R.id.reader_image);symbol.setImageDrawable(ReaderUi.icon(this,image,selected?BLUE:MUTED));TextView label=item.findViewById(R.id.reader_text);label.setText(value);label.setTextColor(selected?BLUE:INK);TextView count=item.findViewById(R.id.reader_textCount);count.setText("");item.findViewById(R.id.reader_ll_selected).setBackgroundColor(BLUE);item.findViewById(R.id.reader_ll_selected).setVisibility(selected?View.VISIBLE:View.INVISIBLE);item.setBackgroundColor(selected?0xfff1f5fc:Color.WHITE);item.setContentDescription(value);item.setOnClickListener(v->{closeDrawer();action.run();});panel.addView(item);return count;
+        View item=getLayoutInflater().inflate(R.layout.reader_item_list_group,panel,false);ImageView symbol=item.findViewById(R.id.reader_image);symbol.setImageDrawable(ReaderUi.icon(this,image,selected?BLUE:MUTED));TextView label=item.findViewById(R.id.reader_text);label.setText(value);label.setTextColor(selected?BLUE:INK);TextView count=item.findViewById(R.id.reader_textCount);count.setText("");item.findViewById(R.id.reader_ll_selected).setBackgroundColor(BLUE);item.findViewById(R.id.reader_ll_selected).setVisibility(selected?View.VISIBLE:View.INVISIBLE);ReaderUi.selectable(item,selected?ReaderUi.TINT:ReaderUi.SURFACE);item.setContentDescription(value);item.setOnClickListener(v->{closeDrawer();action.run();});panel.addView(item);return count;
     }
     private void selectSource(String key,String title,int selectedFilter){priorityOnly=false;source=key;sourceTitle=title;filter=selectedFilter;visibleLimit=100;nextPage=null;libraryFilter=new ReaderFilterState();libraryFilter.save(preferences,profile);generation++;showList();}
     private void showSources(){if(nativeDrawer!=null&&!detailVisible){hideKeyboard();if(nativeDrawer.isDrawerOpen(androidx.core.view.GravityCompat.START))closeDrawer();else nativeDrawer.openDrawer(androidx.core.view.GravityCompat.START);}}
@@ -293,10 +302,9 @@ public class ReaderActivity extends Activity {
         drawerSection(drawerPanel,"标签");LinearLayout tagsPanel=column();drawerPanel.addView(tagsPanel);drawerItem(drawerPanel,"tag","管理标签",false,()->manageTags());
         drawerSection(drawerPanel,"校园访问");connectionStatus=text("",12,MUTED);connectionStatus.setPadding(dp(16),0,dp(16),dp(8));drawerPanel.addView(connectionStatus);
         connectionHint=text("",12,MUTED);connectionHint.setPadding(dp(16),0,dp(16),dp(8));drawerPanel.addView(connectionHint);
-        drawerItem(drawerPanel,"settings","校园配置",false,()->openCampusConfiguration());
+        drawerItem(drawerPanel,"settings","学校与校园配置",false,()->openCampusConfiguration());
         drawerItem(drawerPanel,"link","校园认证",false,()->connect());
         portalButton=button("检查 / 登录信息门户",v->{closeDrawer();portalLogin();});portalButton.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);portalButton.setPadding(dp(56),0,dp(16),0);drawerPanel.addView(portalButton,new LinearLayout.LayoutParams(-1,dp(48)));
-        drawerItem(drawerPanel,"link","打开门户登录页",false,()->portalLogin());
         drawerItem(drawerPanel,"refresh","刷新通知",false,()->refresh(false));
         status=text(statusText(),12,MUTED);status.setPadding(dp(16),dp(4),dp(16),dp(12));drawerPanel.addView(status);
         View separator=new View(this);separator.setBackgroundColor(ReaderUi.LINE);drawerPanel.addView(separator,new LinearLayout.LayoutParams(-1,dp(1)));drawerItem(drawerPanel,"download","下载文件",false,()->MediaActions.viewDownloads(this));View settingsRow=getLayoutInflater().inflate(R.layout.reader_list_footer,drawerPanel,false);((TextView)settingsRow.findViewById(R.id.reader_text_settings)).setText("设置");settingsRow.findViewById(R.id.reader_ll_settings).setOnClickListener(v->{closeDrawer();openSettings();});drawerPanel.addView(settingsRow);
@@ -315,12 +323,12 @@ public class ReaderActivity extends Activity {
                 if(connection==CampusNoticeStore.ConnectionState.REAUTH_REQUIRED&&!busy)message(deferredPortalRefresh.hasRequest()?"门户登录已返回，等待校园通道恢复后验证；缓存仍可阅读。":"信息门户需要单独登录，请点击“登录信息门户”。已缓存内容和阅读状态仍保留。");
                 matchingCount=total;heading.setText("已显示 "+found.size()+" / "+total+" 篇"+(libraryFilter.active()?" · 已筛选":"")+(keywordRules.hasBlocked()?" · 已应用屏蔽词":""));more.setVisibility(total>found.size()||CampusPortalParser.SOURCE.equals(s)?View.VISIBLE:View.GONE);
                 if(restoreListPending){restoreListPending=false;if(queryScope.equals(savedListScope))list.setSelectionFromTop(savedListPosition,savedListTop);else list.setSelection(0);}else if(!queryScope.equals(listScope))list.setSelection(0);listScope=queryScope;
-                if(found.isEmpty()&&!priorityOnly&&!keywordRules.hasBlocked()&&!libraryFilter.active()&&CampusPortalParser.SOURCE.equals(s)&&CampusApplication.auth().isAccessReady()&&!busy&&!clearingSession&&!attemptedAutoRefresh){attemptedAutoRefresh=true;refresh(false);}
+                if(resumed&&new ReaderPreferences(this).isRefreshOnOpen()&&CampusPortalParser.SOURCE.equals(s)&&CampusApplication.auth().isAccessReady()&&!busy&&!clearingSession&&!portalLoginInFlight&&!attemptedAutoRefresh){attemptedAutoRefresh=true;refresh(false);}
             });
         }catch(Exception e){ui(token,()->message("读取本地缓存失败；未修改缓存。"));}try{ImageCacheMaintenance.prune(this,p);}catch(Exception ignored){}});
     }
     private void refreshAfterPortalLogin(String loginProfile) {
-        if(!loginProfile.equals(profile)||campusState(loginProfile)==PortalBatchDownloader.State.ACCOUNT_CHANGED){message("校园账号已变化，请使用当前账号重新登录信息门户。");return;}
+        if(loginProfile==null||!loginProfile.equals(profile)||campusState(loginProfile)==PortalBatchDownloader.State.ACCOUNT_CHANGED){message("校园账号已变化，请使用当前账号重新登录信息门户。");return;}
         if(!CampusPortalParser.SOURCE.equals(source)){source=CampusPortalParser.SOURCE;sourceTitle="校内通知";filter=0;generation++;showList();}
         deferredPortalRefresh.request(loginProfile);
         message(CampusApplication.auth().isAccessReady()?"门户登录已返回；正在等待当前请求结束后刷新通知…":"校园通道尚未恢复；恢复后将刷新通知，现有缓存仍可阅读。");
@@ -404,7 +412,7 @@ public class ReaderActivity extends Activity {
         rememberListPosition();closeDrawer();if(pendingSearch!=null)mainHandler.removeCallbacks(pendingSearch);
         detailVisible=true;final CampusNotice notice=displayed==null?cached.content:displayed;final String p=profile;final int token=generation;final boolean hasBody=displayed!=null&&!displayed.bodyHtml.trim().isEmpty();
         final boolean[] flags={cached.read,cached.later};final boolean[] opened={false};
-        LinearLayout root=column();root.setBackgroundColor(Color.WHITE);
+        LinearLayout root=column();root.setBackgroundColor(ReaderUi.SURFACE);
         LinearLayout top=row();top.addView(icon("close","返回通知列表",v->showList()),new LinearLayout.LayoutParams(dp(48),dp(48)));TextView sourceName=text(CampusPortalParser.SOURCE.equals(notice.key.source)?"校内通知":sourceTitle,13,MUTED);sourceName.setGravity(Gravity.CENTER_VERTICAL);top.addView(sourceName,new LinearLayout.LayoutParams(0,dp(48),1));root.addView(top);
         View bar=getLayoutInflater().inflate(R.layout.reader_reader_bottom_bar,root,false);Button unread=bar.findViewById(R.id.reader_btn_read),later=bar.findViewById(R.id.reader_btn_star);updateDetailButtons(unread,later,flags);
         unread.setOnClickListener(v->{opened[0]=true;flags[0]=!flags[0];updateDetailButtons(unread,later,flags);setFlag(notice.key,true,flags[0],null);});
@@ -414,7 +422,7 @@ public class ReaderActivity extends Activity {
         ((Button)bar.findViewById(R.id.reader_btn_tag)).setCompoundDrawablesWithIntrinsicBounds(null,ReaderUi.icon(this,"tag",INK),null,null);
         ((Button)bar.findViewById(R.id.reader_btn_more)).setCompoundDrawablesWithIntrinsicBounds(null,ReaderUi.icon(this,"more",INK),null,null);
         if(!hasBody)root.addView(button("正文已清理 · 联网重新获取",v->refetchBody(cached)),new LinearLayout.LayoutParams(-1,dp(48)));
-        detailWeb=new WebView(this);detailWeb.setBackgroundColor(Color.WHITE);WebSettings settings=detailWeb.getSettings();settings.setJavaScriptEnabled(false);settings.setAllowFileAccess(false);settings.setAllowContentAccess(false);settings.setDomStorageEnabled(false);settings.setTextZoom(preferences.getInt("reader-text-zoom",100));
+        detailWeb=new WebView(this);detailWeb.setBackgroundColor(ReaderUi.SURFACE);WebSettings settings=detailWeb.getSettings();settings.setJavaScriptEnabled(false);settings.setAllowFileAccess(false);settings.setAllowContentAccess(false);settings.setDomStorageEnabled(false);settings.setTextZoom(preferences.getInt("reader-text-zoom",100));
         detailWeb.setWebViewClient(new WebViewClient(){
             @Override public boolean shouldOverrideUrlLoading(WebView view,String url){openArticleLink(notice,p,url);return true;}
             @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request){openArticleLink(notice,p,request.getUrl().toString());return true;}
@@ -454,11 +462,18 @@ public class ReaderActivity extends Activity {
     private void showTextSize(){int[] sizes={90,100,110,125,140};String[] names={"较小 · 90%","标准 · 100%","较大 · 110%","大 · 125%","特大 · 140%"};int selected=1;int current=preferences.getInt("reader-text-zoom",100);for(int i=0;i<sizes.length;i++)if(current==sizes[i])selected=i;new AlertDialog.Builder(this).setTitle("正文字号").setSingleChoiceItems(names,selected,(dialog,index)->{preferences.edit().putInt("reader-text-zoom",sizes[index]).apply();if(detailWeb!=null)detailWeb.getSettings().setTextZoom(sizes[index]);dialog.dismiss();}).setNegativeButton("返回",null).show();}
     private void refetchBody(CachedNotice cached){final WebView requestedPage=detailWeb;final String p=profile;final int token=generation;final boolean campus=CampusPortalParser.SOURCE.equals(cached.content.key.source);final Subscription feed=subscription(cached.content.key.source);
         if(campus&&!CampusApplication.auth().isAccessReady()){connect();return;}
-        Toast.makeText(this,"正在重新获取正文…",Toast.LENGTH_SHORT).show();network.execute(()->{try(CampusNoticeStore store=new CampusNoticeStore(this,p)){CampusNotice notice=null;
-            if(campus){requireCampus(p);ReaderHttp.Response response=ReaderHttp.get(cached.content.originalUrl,5*1024*1024,true);requireCampus(p);notice=parser.parseDetail(response.url,response.status,response.text()).notice;}
-            else if(feed!=null){ReaderHttp.Response response=ReaderHttp.get(feed.url,5*1024*1024,false);if(response.status!=200)throw new IOException();for(CampusNotice item:RssParser.parse(feed.url,response.url,response.text()).items)if(item.key.equals(cached.content.key)){notice=item;break;}}
-            if(notice==null||!notice.key.equals(cached.content.key))throw new IOException();store.upsert(Collections.singletonList(notice),System.currentTimeMillis());CachedNotice state=store.find(notice.key);CampusNotice body=notice;ui(token,()->{if(!detailVisible||detailWeb!=requestedPage){if(!detailVisible)loadCache();return;}if(detailWeb!=null)detailWeb.destroy();showDetail(state,body);});
-        }catch(Exception e){ui(token,()->Toast.makeText(this,"正文未能取回；请检查校园/门户登录，或打开原文。阅读状态未更改。",Toast.LENGTH_LONG).show());}});
+        final ReaderPreferences requestPrefs=new ReaderPreferences(this);final long portalGeneration=requestPrefs.getPortalGeneration(),foregroundGeneration=foregroundRequestGeneration;
+        final java.util.function.BooleanSupplier cancelled=()->token!=generation||foregroundGeneration!=foregroundRequestGeneration||(campus&&portalGeneration!=requestPrefs.getPortalGeneration());
+        Toast.makeText(this,"正在重新获取正文…",Toast.LENGTH_SHORT).show();network.execute(()->{
+            SyncGate.Lease lease=campus?SyncGate.tryAcquire(p):null;
+            if(campus&&lease==null){ui(token,()->Toast.makeText(this,"正在刷新或认证，请稍后重新获取正文。",Toast.LENGTH_SHORT).show());return;}
+            try(SyncGate.Lease ignored=lease;CampusNoticeStore store=new CampusNoticeStore(this,p)){
+                ReaderHttp.RequestGuard guard=new ReaderHttp.RequestGuard(p,campus,Thread.currentThread(),cancelled);guard.check();CampusNotice notice=null;
+                if(campus){ReaderHttp.Response response=ReaderHttp.get(cached.content.originalUrl,5*1024*1024,true,cancelled);guard.check();notice=parser.parseDetail(response.url,response.status,response.text()).notice;}
+                else if(feed!=null){ReaderHttp.Response response=ReaderHttp.get(feed.url,5*1024*1024,false,cancelled);if(response.status!=200)throw new IOException();for(CampusNotice item:RssParser.parse(feed.url,response.url,response.text()).items)if(item.key.equals(cached.content.key)){notice=item;break;}}
+                if(notice==null||!notice.key.equals(cached.content.key))throw new IOException();guard.check();store.upsert(Collections.singletonList(notice),System.currentTimeMillis());CachedNotice state=store.find(notice.key);CampusNotice body=notice;ui(token,()->{if(cancelled.getAsBoolean())return;if(!detailVisible||detailWeb!=requestedPage){if(!detailVisible)loadCache();return;}if(detailWeb!=null)detailWeb.destroy();showDetail(state,body);});
+            }catch(Exception e){if(!cancelled.getAsBoolean())ui(token,()->Toast.makeText(this,"正文未能取回；请检查校园/门户登录，或打开原文。阅读状态未更改。",Toast.LENGTH_LONG).show());}
+        });
     }
     private void setFlag(NoticeKey key,boolean read,boolean value,Runnable after) {
         final String p=profile;final int token=generation;
@@ -492,48 +507,32 @@ public class ReaderActivity extends Activity {
         try {java.net.URI uri=new java.net.URI(url);if(uri.getHost()==null||uri.getUserInfo()!=null||!("http".equalsIgnoreCase(uri.getScheme())||"https".equalsIgnoreCase(uri.getScheme())))throw new IOException();startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}
         catch(Exception e){Toast.makeText(this,"无法打开链接；校园原文及附件需要有效校园连接。",Toast.LENGTH_LONG).show();}
     }
-    private void promptPortalLogin(){if(!portalPrompted&&!deferredPortalRefresh.hasRequest()&&resumed&&!detailVisible&&CampusApplication.auth().isAccessReady()){portalPrompted=true;portalLogin();}}
-    private void portalLogin() {
-        if(portalDialog!=null&&portalDialog.isShowing())return;
-        if(!CampusApplication.auth().isAccessReady()){connect();return;}
-        if(clearingSession){message("正在切换校园账号，请稍后点击“登录信息门户”。");return;}
-        final WebView web=new WebView(this);WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);settings.setAllowFileAccess(false);settings.setAllowContentAccess(false);settings.setUserAgentString(ReaderHttp.USER_AGENT);
-        web.setFocusable(true);web.setFocusableInTouchMode(true);
-        LinearLayout loginRoot=column();TextView loginStatus=text("正在加载信息门户…",13,MUTED);loginStatus.setPadding(dp(16),dp(8),dp(16),dp(8));loginRoot.addView(loginStatus);
-        FrameLayout webFrame=new FrameLayout(this);webFrame.addView(web,new FrameLayout.LayoutParams(-1,-1));
-        loginRoot.addView(webFrame,new LinearLayout.LayoutParams(-1,(int)(getResources().getDisplayMetrics().heightPixels*0.62)));
-        final boolean[] pageError={false};
-        web.setWebViewClient(new WebViewClient(){
-            private boolean navigation(String url){if(allowedLoginUrl(url))return false;pageError[0]=true;loginStatus.setText("已阻止校园认证范围之外的登录跳转");return true;}
-            @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest request){
-                return allowedLoginUrl(request.getUrl().toString())?null:new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
-            }
-            @Override public boolean shouldOverrideUrlLoading(WebView v,String url){return navigation(url);}
-            @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest request){return navigation(request.getUrl().toString());}
-            @Override public void onPageStarted(WebView v,String url,Bitmap favicon){pageError[0]=false;loginStatus.setText("正在加载信息门户登录页…");}
-            @Override public void onPageFinished(WebView v,String url){if(!pageError[0])loginStatus.setText("完成账号密码登录后，点击下方“完成，刷新通知”。");}
-            @Override public void onReceivedError(WebView v,WebResourceRequest request,WebResourceError error){if(request.isForMainFrame()){pageError[0]=true;loginStatus.setText("登录页面加载失败（"+error.getErrorCode()+"），请检查校园连接后重新打开。" );android.util.Log.w("CampusReader","Portal login main frame error="+error.getErrorCode());}}
-            @Override public void onReceivedHttpError(WebView v,WebResourceRequest request,WebResourceResponse response){if(request.isForMainFrame()){pageError[0]=true;loginStatus.setText("登录页面返回 HTTP "+response.getStatusCode()+"，请稍后重试。");}}
-            @Override public void onReceivedSslError(WebView v,SslErrorHandler handler,android.net.http.SslError error){handler.cancel();pageError[0]=true;loginStatus.setText("登录页面证书验证失败，已停止连接。请检查手机时间或联系学校。");android.util.Log.w("CampusReader","Portal login certificate rejected");}
-        });
-        final String loginProfile=profile;
-        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("信息门户 · 学生账号密码登录").setView(loginRoot).setPositiveButton("完成，刷新通知",(d,w)->{CookieManager.getInstance().flush();refreshAfterPortalLogin(loginProfile);}).setNegativeButton("返回缓存",null).create();
-        portalDialog=dialog;dialog.setOnDismissListener(d->{web.destroy();portalDialog=null;});dialog.show();
-        Window loginWindow=dialog.getWindow();
-        // AlertController may classify WebView as a non-editor before an HTML input gains focus.
-        // Clear its IME-blocking flag after show(), when AlertController has installed the content.
-        loginWindow.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);
-        loginWindow.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE|WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
-        loginWindow.setLayout(-1,(int)(getResources().getDisplayMetrics().heightPixels*0.88));
-        web.requestFocus(View.FOCUS_DOWN);web.loadUrl(CampusSite.loginUrl());
+    private void promptPortalLogin(){
+        if(!portalPrompted&&!deferredPortalRefresh.hasRequest()&&resumed&&!detailVisible
+                &&CampusApplication.auth().isAccessReady()&&new ReaderPreferences(this).isPortalAutoRestoreEnabled()){
+            portalPrompted=true;portalLogin(true);
+        }
     }
-    private static boolean allowedLoginUrl(String value){return CampusSite.allowsLoginUrl(value);}
+    private void portalLogin(){portalLogin(false);}
+    private void portalLogin(boolean automatic){
+        if(portalLoginInFlight)return;
+        if(automatic&&!PortalSessionCoordinator.shouldAttempt(this,profile))return;
+        if(!CampusApplication.auth().isAccessReady()){if(!automatic)connect();return;}
+        if(clearingSession){message("正在切换校园账号，请稍后重新登录门户。");return;}
+        portalLoginInFlight=true;
+        startActivityForResult(new Intent(this,PortalLoginActivity.class)
+                .putExtra(PortalLoginActivity.EXTRA_PROFILE,profile)
+                .putExtra(PortalLoginActivity.EXTRA_MANAGE,!automatic)
+                .putExtra(PortalLoginActivity.EXTRA_AUTOMATIC,automatic),PORTAL);
+    }
     private byte[] imageData(String p,String url) throws IOException {
         byte[] cached=ImageCacheMaintenance.read(this,p,url);if(cached!=null)return cached;
-        if(ReaderHttp.isCampus(url))requireCampus(p);
-        ReaderHttp.Response response=ReaderHttp.get(url,5*1024*1024,ReaderHttp.isCampus(url));
+        final boolean campus=ReaderHttp.isCampus(url);final ReaderPreferences requestPrefs=new ReaderPreferences(this);final long portalGeneration=requestPrefs.getPortalGeneration(),foregroundGeneration=foregroundRequestGeneration;
+        final java.util.function.BooleanSupplier cancelled=()->foregroundGeneration!=foregroundRequestGeneration||(campus&&portalGeneration!=requestPrefs.getPortalGeneration());
+        ReaderHttp.RequestGuard guard=new ReaderHttp.RequestGuard(p,campus,Thread.currentThread(),cancelled);guard.check();
+        ReaderHttp.Response response=ReaderHttp.get(url,5*1024*1024,campus,cancelled);
         if(response.status!=200||!response.mime.toLowerCase(Locale.ROOT).startsWith("image/"))throw new IOException("Not an image");
-        if(ReaderHttp.isCampus(url))requireCampus(p);
+        guard.check();
         ImageCacheMaintenance.put(this,p,url,response.bytes);return response.bytes;
     }
 
@@ -544,7 +543,7 @@ public class ReaderActivity extends Activity {
         @Override public long getItemId(int position){return position;}
         @Override public View getView(int position,View reused,android.view.ViewGroup parent) {
             final CachedNotice cached=rows.get(position);final String mode=viewMode;final String p=profile;final int token=generation;
-            FrameLayout holder=new FrameLayout(ReaderActivity.this);holder.setBackgroundColor(Color.WHITE);
+            FrameLayout holder=new FrameLayout(ReaderActivity.this);holder.setBackgroundColor(ReaderUi.SURFACE);
             // A text row is always usable while its optional thumbnail is unavailable.
             holder.addView(noticeRow(cached,"list",null),new FrameLayout.LayoutParams(-1,-2));
             if(!"list".equals(mode)&&cached.bodyCached&&cached.content.hasImage()) {
@@ -557,13 +556,13 @@ public class ReaderActivity extends Activity {
     }
     private View noticeRow(CachedNotice cached,String mode,Bitmap bitmap){
         boolean card="card".equals(mode);int layout=card?R.layout.reader_item_article_card:"magazine".equals(mode)?R.layout.reader_item_article_magazine:R.layout.reader_item_article_list;
-        View row=getLayoutInflater().inflate(layout,list,false);TextView title=row.findViewById(R.id.reader_content_txt);title.setText(cached.content.title);title.setTextColor(card?Color.WHITE:cached.read?0xff777777:INK);title.setTypeface(Typeface.create("sans-serif",cached.read?Typeface.NORMAL:Typeface.BOLD));
-        TextView origin=row.findViewById(R.id.reader_title_txt),published=row.findViewById(R.id.reader_date);if(origin!=null){origin.setText(CampusPortalParser.SOURCE.equals(cached.content.key.source)?"校内通知":"订阅");origin.setTextColor(card?Color.WHITE:MUTED);}if(published!=null){published.setText(" · "+date(cached.content.publishedAtMillis));published.setTextColor(card?Color.WHITE:MUTED);}
-        ImageView star=row.findViewById(R.id.reader_image_star_lg);if(star!=null){star.setVisibility(cached.later?View.VISIBLE:View.GONE);star.setColorFilter(card?Color.WHITE:BLUE);star.setContentDescription("稍后读");}
+        View row=getLayoutInflater().inflate(layout,list,false);TextView title=row.findViewById(R.id.reader_content_txt);title.setText(cached.content.title);title.setTextColor(cached.read?MUTED:INK);title.setTypeface(Typeface.create("sans-serif",cached.read?Typeface.NORMAL:Typeface.BOLD));
+        TextView origin=row.findViewById(R.id.reader_title_txt),published=row.findViewById(R.id.reader_date);if(origin!=null){origin.setText(CampusPortalParser.SOURCE.equals(cached.content.key.source)?"校内通知":"订阅");origin.setTextColor(MUTED);}if(published!=null){published.setText(date(cached.content.publishedAtMillis));published.setTextColor(MUTED);}
+        ImageView star=row.findViewById(R.id.reader_image_star_lg);if(star!=null){star.setVisibility(cached.later?View.VISIBLE:View.GONE);star.setColorFilter(BLUE);star.setContentDescription("稍后读");}
         View offline=row.findViewById(R.id.reader_image_offline);if(offline!=null)offline.setVisibility(View.GONE);
-        ImageView readIcon=row.findViewById(R.id.reader_image_read_lg);if(readIcon!=null){readIcon.setVisibility(cached.read?View.GONE:View.VISIBLE);readIcon.setColorFilter(Color.WHITE);}
+        ImageView readIcon=row.findViewById(R.id.reader_image_read_lg);if(readIcon!=null){readIcon.setVisibility(cached.read?View.GONE:View.VISIBLE);readIcon.setColorFilter(ReaderUi.SURFACE);}
         ImageView image=row.findViewById(R.id.reader_photo_preview);if(image!=null&&bitmap!=null)image.setImageBitmap(bitmap);
-        if(card){View gradient=row.findViewById(R.id.reader_card_gradient);gradient.setBackground(new android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,new int[]{0x00000000,0x18000000,0xdc000000}));}
+        if(card){View gradient=row.findViewById(R.id.reader_card_gradient);if(gradient!=null)gradient.setVisibility(View.GONE);}
         row.setContentDescription(cached.content.title+"，"+date(cached.content.publishedAtMillis)+(cached.read?"，已读":"，未读")+(cached.later?"，稍后读":"")+tagText(cached.tags));
         // Row actions remain available without a gesture through the native long-press menu.
         return row;
@@ -588,10 +587,10 @@ public class ReaderActivity extends Activity {
     private LinearLayout column(){LinearLayout v=new LinearLayout(this);v.setOrientation(LinearLayout.VERTICAL);return v;}
     private LinearLayout row(){LinearLayout v=new LinearLayout(this);v.setOrientation(LinearLayout.HORIZONTAL);v.setGravity(Gravity.CENTER_VERTICAL);return v;}
     private TextView text(String value,int size,int color){TextView v=new TextView(this);v.setText(value);v.setTextSize(size);v.setTextColor(color);return v;}
-    private Button button(String value,View.OnClickListener click){Button b=new Button(this);b.setText(value);b.setTextSize(14);b.setTextColor(BLUE);b.setAllCaps(false);b.setMinWidth(0);b.setMinimumWidth(0);b.setMinHeight(0);b.setMinimumHeight(0);b.setPadding(dp(8),0,dp(8),0);android.util.TypedValue style=new android.util.TypedValue();getTheme().resolveAttribute(android.R.attr.selectableItemBackground,style,true);if(style.resourceId!=0)b.setBackgroundResource(style.resourceId);else b.setBackgroundColor(Color.TRANSPARENT);if(click!=null)b.setOnClickListener(click);return b;}
+    private Button button(String value,View.OnClickListener click){Button b=new Button(this);b.setText(value);b.setTextSize(14);b.setTextColor(BLUE);b.setAllCaps(false);b.setMinWidth(dp(48));b.setMinimumWidth(dp(48));b.setMinHeight(dp(48));b.setMinimumHeight(dp(48));b.setPadding(dp(8),0,dp(8),0);ReaderUi.selectable(b);if(click!=null)b.setOnClickListener(click);return b;}
     private int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}
     private static String date(long time){if(time==0)return "未提供日期";SimpleDateFormat f=new SimpleDateFormat("yyyy-MM-dd",Locale.CHINA);f.setTimeZone(TimeZone.getTimeZone("Asia/Shanghai"));return f.format(new Date(time));}
     private static String escape(String text){return text.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;");}
     @Override public void onBackPressed(){if(nativeDrawer!=null&&nativeDrawer.isDrawerOpen(androidx.core.view.GravityCompat.START))closeDrawer();else if(detailVisible)showList();else if(searchInput!=null&&((View)searchInput.getParent()).getVisibility()==View.VISIBLE){((View)searchInput.getParent()).setVisibility(View.GONE);hideKeyboard();}else super.onBackPressed();}
-    @Override protected void onDestroy(){if(configurationLease!=null){configurationLease.close();configurationLease=null;}mainHandler.removeCallbacks(readiness);if(pendingSearch!=null)mainHandler.removeCallbacks(pendingSearch);if(portalDialog!=null)portalDialog.dismiss();if(detailWeb!=null)detailWeb.destroy();worker.shutdown();network.shutdownNow();images.shutdown();thumbnails.evictAll();super.onDestroy();}
+    @Override protected void onDestroy(){foregroundRequestGeneration++;if(configurationLease!=null){configurationLease.close();configurationLease=null;}mainHandler.removeCallbacks(readiness);if(pendingSearch!=null)mainHandler.removeCallbacks(pendingSearch);if(detailWeb!=null)detailWeb.destroy();worker.shutdown();network.shutdownNow();images.shutdownNow();thumbnails.evictAll();super.onDestroy();}
 }

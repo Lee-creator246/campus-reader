@@ -19,9 +19,9 @@ final class MediaTransfer {
     private static final Object[] FETCH_LOCKS=new Object[64];
     static {for(int i=0;i<FETCH_LOCKS.length;i++)FETCH_LOCKS[i]=new Object();}
     static final class Entry {
-        final String profileHash, id, name, mime; final File file;
-        Entry(String profileHash, String id, String name, String mime, File file) {
-            this.profileHash=profileHash;this.id=id;this.name=name;this.mime=mime;this.file=file;
+        final String profileHash, id, name, mime, revision; final File file;
+        Entry(String profileHash, String id, String name, String mime, File file,String revision) {
+            this.profileHash=profileHash;this.id=id;this.name=name;this.mime=mime;this.file=file;this.revision=revision;
         }
     }
     static File root(Context context) { return new File(context.getCacheDir(), "campus-media"); }
@@ -39,6 +39,8 @@ final class MediaTransfer {
     private static Entry fetchLocked(Context context,String profile,String address,String hint,boolean image,String referer) throws Exception {
         requireProfile(profile);
         boolean campus = ReaderHttp.isCampus(address);
+        ReaderPreferences cookiePrefs=new ReaderPreferences(context);long cookieGeneration=cookiePrefs.getPortalGeneration();
+        ReaderHttp.RequestGuard requestGuard=new ReaderHttp.RequestGuard(profile,campus,Thread.currentThread(),()->campus&&cookiePrefs.getPortalGeneration()!=cookieGeneration);
         if(campus&&"local".equals(profile))throw new MediaSafety.Rejected("CAMPUS_ACCOUNT_REQUIRED");
         URL original = MediaSafety.checked(address, campus);
         String profileHash = hash(profile), id = hash(address);
@@ -63,7 +65,7 @@ final class MediaTransfer {
             if (campus && !CampusApplication.auth().isAccessReady()) throw new MediaSafety.Rejected("CAMPUS_OFFLINE");
             URL current = original;
             for (int redirects=0; redirects <= 5; redirects++) {
-                requireProfile(profile);
+                requireProfile(profile);requestGuard.check();
                 HttpURLConnection connection = (HttpURLConnection) current.openConnection();
                 try {
                     connection.setConnectTimeout(15000); connection.setReadTimeout(20000); connection.setInstanceFollowRedirects(false);
@@ -79,10 +81,10 @@ final class MediaTransfer {
                     }
                     int status = connection.getResponseCode();
                     if(!image)android.util.Log.i("CampusMedia","event=attachment_response redirect="+redirects+" http="+status);
-                    requireProfile(profile);
+                    requireProfile(profile);requestGuard.check();
                     if (campus) for (Map.Entry<String,List<String>> header : connection.getHeaderFields().entrySet()) {
                         if ("set-cookie".equalsIgnoreCase(header.getKey())) for (String cookie : header.getValue()) {
-                            requireProfile(profile);CookieManager.getInstance().setCookie(current.toString(), cookie);
+                            ReaderHttp.persistCookie(requestGuard,current.toString(),cookie);
                         }
                     }
                     if (status==301||status==302||status==303||status==307||status==308) {
@@ -110,7 +112,7 @@ final class MediaTransfer {
                         if(inferred!=null)mime=inferred;
                     }
                     if (image) { mime=imageMime(temporary); if (mime==null) throw new IOException("不是支持的图片格式"); }
-                    return commit(context,profile,profileHash,id,temporary,name,mime);
+                    requestGuard.check();return commit(context,profile,profileHash,id,temporary,name,mime);
                 } finally { connection.disconnect(); }
             }
             throw new MediaSafety.Rejected("TOO_MANY_REDIRECTS");
@@ -128,13 +130,17 @@ final class MediaTransfer {
         if(mime.startsWith("image/")&&!name.matches("(?i).*\\.(png|jpe?g|webp|gif|bmp)$")) name += extension(mime);
         File target=new File(temporary.getParentFile(),id+".data");
         trim(context,temporary.length(),target);
+        // Revoke the previous revision before changing bytes. A process death after rename
+        // must leave an unreadable cache entry, never old metadata pointing to new bytes.
+        File meta=new File(target.getParentFile(),id+".json");
+        if(meta.exists()&&!meta.delete())throw new IOException("无法撤销旧下载版本");
         if(target.exists()&&!target.delete()) throw new IOException("无法替换旧下载");
         if(!temporary.renameTo(target)) throw new IOException("无法保存下载");
-        JSONObject metadata=new JSONObject();metadata.put("name",name);metadata.put("mime",mime);
-        File meta=new File(target.getParentFile(),id+".json");
+        String revision=java.util.UUID.randomUUID().toString();
+        JSONObject metadata=new JSONObject();metadata.put("name",name);metadata.put("mime",mime);metadata.put("revision",revision);
         try(OutputStream output=new FileOutputStream(meta)) { output.write(metadata.toString().getBytes(StandardCharsets.UTF_8)); }
         catch(IOException failure){target.delete();meta.delete();throw failure;}
-        return new Entry(profileHash,id,name,mime,target);
+        return new Entry(profileHash,id,name,mime,target,revision);
     }
     static String extension(String mime) { if("image/jpeg".equals(mime))return ".jpg";if("image/webp".equals(mime))return ".webp";if("image/gif".equals(mime))return ".gif";if("image/bmp".equals(mime))return ".bmp";return ".png"; }
     static synchronized Entry read(Context context,String profileHash,String id) {
@@ -143,7 +149,8 @@ final class MediaTransfer {
         if(!data.isFile()||!meta.isFile()||meta.length()>4096)return null;
         try(InputStream input=new FileInputStream(meta);ByteArrayOutputStream output=new ByteArrayOutputStream()) {
             MediaSafety.copyBounded(input,output,4096,meta.length());JSONObject obj=new JSONObject(new String(output.toByteArray(),StandardCharsets.UTF_8));
-            return new Entry(profileHash,id,MediaSafety.filename(null,obj.getString("name")),MediaSafety.mime(obj.getString("mime"),""),data);
+            String revision=obj.optString("revision","legacy");if(!revision.equals("legacy")&&!revision.matches("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"))return null;
+            return new Entry(profileHash,id,MediaSafety.filename(null,obj.getString("name")),MediaSafety.mime(obj.getString("mime"),""),data,revision);
         }catch(Exception e){return null;}
     }
     static synchronized List<Entry> list(Context context,String profile) {

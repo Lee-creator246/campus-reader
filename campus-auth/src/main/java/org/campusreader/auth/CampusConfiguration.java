@@ -31,6 +31,10 @@ public final class CampusConfiguration {
     public static boolean hasConsent() { return consent; }
     public static boolean isChanging() { return changing; }
     public static boolean requiresRestart() { return restartRequired; }
+    /** A no-op form submission must not stop a valid SDK or clear its portal cookies. */
+    public static boolean isUnchanged(CampusSite.Profile next) {
+        return isConfigured() && next != null && next.configured && CampusSite.scopeId().equals(next.scopeId);
+    }
     public static void requireConnectionAllowed() {
         if (!isConfigured()) throw new IllegalStateException(restartRequired
                 ? "校园配置已保存，请关闭应用后重新打开" : "请先填写校园配置并同意连接服务说明");

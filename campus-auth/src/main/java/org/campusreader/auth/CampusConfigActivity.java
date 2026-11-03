@@ -12,6 +12,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
 import android.text.InputFilter;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
@@ -27,21 +29,32 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import org.campusreader.config.CampusConfigImport;
 import org.campusreader.config.CampusSite;
+import org.campusreader.config.SchoolDirectory;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /** Native setup. Values stay inside private app storage and are never included in Activity results. */
 public final class CampusConfigActivity extends Activity {
     public static final int RESULT_RESTART_REQUIRED = RESULT_FIRST_USER;
-    private static final int IMPORT_FILE = 3401;
-    private static final int BLUE=0xff2767d8, INK=0xff202124, MUTED=0xff647082, BACKGROUND=0xfff5f6f8;
+    private static final int IMPORT_FILE = 3401, IMPORT_DIRECTORY = 3402;
+    private static final int BLUE=0xff245bc4, INK=0xff19232d, MUTED=0xff56616f, BACKGROUND=0xfff4f6f8;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService imports = Executors.newSingleThreadExecutor();
     private EditText domain, vpn, list, portalLogin;
     private CheckBox consent;
     private TextView status;
     private Button save, back, pasteImport, fileImport;
+    private Button directoryFile, directoryUrl, advancedButton;
+    private EditText schoolSearch;
+    private LinearLayout schoolRows, advanced;
+    private TextView selectedSchool;
+    private SchoolDirectory directory;
+    private String selectedName="",selectedScope="";
+    private volatile HttpURLConnection directoryConnection;
     private boolean saving, importing;
     private final Runnable clearDeadline = () -> showSaveFailure();
 
@@ -61,35 +74,51 @@ public final class CampusConfigActivity extends Activity {
         TextView title=text("校园配置",20,INK);title.setTypeface(Typeface.DEFAULT,Typeface.BOLD);toolbar.addView(title,new LinearLayout.LayoutParams(0,-2,1));root.addView(toolbar);
         ScrollView scroll=new ScrollView(this);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         LinearLayout page=column();page.setPadding(dp(20),dp(24),dp(20),dp(24));scroll.addView(page);
-        TextView heading=text("设置你的校园访问入口",22,INK);heading.setTypeface(Typeface.DEFAULT,Typeface.BOLD);page.addView(heading);
-        add(page,text("向学校确认以下地址后填写。示例仅帮助理解格式，不会自动填入或连接。保存后先完成校园连接，再单独登录信息门户。",14,MUTED),10);
+        TextView heading=text("选择你的学校",24,INK);heading.setTypeface(Typeface.DEFAULT,Typeface.BOLD);page.addView(heading);
+        add(page,text("选好学校后，依次完成校园连接和信息门户登录。已有校园配置可直接继续使用。",14,MUTED),10);
+        directory=new SchoolDirectoryStore(this).load();
+        selectedSchool=text("尚未选择学校",16,INK);add(page,selectedSchool,20);
+        schoolSearch=new EditText(this);schoolSearch.setSingleLine(true);schoolSearch.setHint("搜索学校名称或域名");schoolSearch.setTextSize(16);schoolSearch.setMinHeight(dp(52));schoolSearch.setSaveEnabled(false);schoolSearch.setFilters(new InputFilter[]{new InputFilter.LengthFilter(100)});add(page,schoolSearch,12);
+        schoolRows=column();add(page,schoolRows,8);
+        LinearLayout directoryActions=new LinearLayout(this);
+        directoryFile=button("导入学校目录",false);directoryUrl=button("下载学校目录",false);
+        LinearLayout.LayoutParams directoryLeft=new LinearLayout.LayoutParams(0,-2,1);directoryLeft.rightMargin=dp(6);directoryActions.addView(directoryFile,directoryLeft);
+        LinearLayout.LayoutParams directoryRight=new LinearLayout.LayoutParams(0,-2,1);directoryRight.leftMargin=dp(6);directoryActions.addView(directoryUrl,directoryRight);add(page,directoryActions,12);
+        add(page,text("导入学校列表文件后，直接搜索并选择学校，无需打开文件编辑。目录可离线使用；实际连接和通知结构仍需验证。",13,MUTED),8);
+        directoryFile.setOnClickListener(v->chooseFile(IMPORT_DIRECTORY));directoryUrl.setOnClickListener(v->downloadDirectory());
+        schoolSearch.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int start,int count,int after){}public void onTextChanged(CharSequence s,int start,int before,int count){renderSchools();}public void afterTextChanged(Editable e){}});
+        advancedButton=button("高级配置与单校导入",false);add(page,advancedButton,20);
+        advanced=column();advanced.setVisibility(View.GONE);add(page,advanced,8);
+        advancedButton.setOnClickListener(v->{boolean opened=advanced.getVisibility()!=View.VISIBLE;advanced.setVisibility(opened?View.VISIBLE:View.GONE);advancedButton.setText(opened?"收起高级配置":"高级配置与单校导入");});
 
         LinearLayout importActions=new LinearLayout(this);importActions.setGravity(Gravity.CENTER_VERTICAL);
         pasteImport=button("粘贴配置",false);fileImport=button("从文件导入",false);
         LinearLayout.LayoutParams importLeft=new LinearLayout.LayoutParams(0,-2,1);importLeft.rightMargin=dp(6);
         LinearLayout.LayoutParams importRight=new LinearLayout.LayoutParams(0,-2,1);importRight.leftMargin=dp(6);
-        importActions.addView(pasteImport,importLeft);importActions.addView(fileImport,importRight);add(page,importActions,18);
-        add(page,text("支持 version 1 的校园阅读 JSON 配置（UTF-8，最多 16 KiB）。先预览差异，再填入下方；只有点击保存才会更改校园访问。配置不得含账号、密码或登录票据。",12,MUTED),8);
+        importActions.addView(pasteImport,importLeft);importActions.addView(fileImport,importRight);add(advanced,importActions,8);
+        add(advanced,text("单校配置支持 version 1 JSON（UTF-8，最多 16 KiB）。预览后填入表单，点击保存才会更改校园访问。",13,MUTED),8);
         pasteImport.setOnClickListener(v->pasteConfiguration());
         fileImport.setOnClickListener(v->chooseConfigurationFile());
 
-        LinearLayout form=column();form.setPadding(dp(18),dp(18),dp(18),dp(18));form.setBackground(shape(Color.WHITE,0xffe5e8ee,14));add(page,form,24);
+        LinearLayout form=column();form.setPadding(dp(16),dp(16),dp(16),dp(16));form.setBackground(shape(Color.WHITE,0xffdce2e8,8));add(advanced,form,16);
         domain=field(form,"校园认证域","例如 campus.example.edu",false);
         vpn=field(form,"VPN HTTPS 入口","例如 https://vpn.campus.example.edu",true);
         list=field(form,"门户通知列表地址","例如 https://portal.campus.example.edu/notices",true);
         portalLogin=field(form,"门户登录地址（可选）","例如 https://sso.campus.example.edu/login",true);
         add(form,text("认证域不含 https:// 或路径。VPN 必须使用学校确认的 HTTPS 地址。通知列表应属于认证域或其子域；门户登录须使用域内 HTTPS，或与通知列表同主机的 HTTP。地址须使用标准端口，HTTP 未加密。请勿填写密码、验证码或带登录票据的地址。",12,MUTED),12);
         CampusSite.Profile current=CampusSite.current();
-        if(current.configured){domain.setText(current.domain);vpn.setText(current.vpnUrl);list.setText(current.portalListUrl);portalLogin.setText(current.loginUrl);}
+        if(current.configured){fillForm(current);selectedName=getSharedPreferences("school-selection",MODE_PRIVATE).getString("name:"+current.scopeId,"当前学校");selectedScope=current.scopeId;selectedSchool.setText(selectedName+" · 当前使用");}
 
         add(page,text("连接服务说明",16,INK),22);
-        add(page,text("校园连接使用深信服 Sangfor 第三方连接 SDK。连接时，该 SDK 可能访问设备标识、设备与系统信息、网络状态及学校安全策略要求的信息，用于认证、建立通道和安全检查；部分设备和网络诊断信息可能发送给服务提供方。Android 可能另行请求 VPN 或设备权限。请仅配置你信任的学校服务。校园配置仅保存在本机应用私有存储中。本项目代码不记录或导出密码；门户网页与连接组件可能保留会话信息。",13,MUTED),10);
+        add(page,text("校园连接使用深信服 Sangfor 第三方 SDK，可能收集设备、网络状态及学校安全策略要求的信息，用于认证和建立通道，部分信息可能发送给服务方。Android 可能请求 VPN 或设备权限。校园配置保存在本机；门户登录可按你的选择加密保存密码，网页与连接组件可能保留会话。",13,MUTED),10);
         consent=new CheckBox(this);consent.setText("我已了解并同意启用第三方校园连接 SDK");consent.setTextColor(INK);consent.setTextSize(14);consent.setSaveEnabled(false);add(page,consent,12);
-        if(CampusSite.isConfigured())add(page,text("保存会退出现有校园连接和门户登录，并清除网页登录状态；已缓存的通知保留。连接服务已启动时，保存后应用会关闭，请从桌面重新打开。",13,MUTED),12);
+        consent.setChecked(CampusConfiguration.hasConsent());
+        if(CampusSite.isConfigured())add(page,text("保持原配置会直接返回阅读。更换学校或访问地址需重新认证；缓存保留。连接服务已启动时，修改保存后需重新打开应用。",13,MUTED),12);
         status=text("",14,0xffb3261e);status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);add(page,status,12);
-        save=button(CampusSdk.wasInitializationAttempted()?"保存并关闭应用":"保存并继续校园认证",true);add(page,save,16);
+        save=button(current.configured?"确认并继续":"保存并继续校园认证",true);add(page,save,16);
         save.setOnClickListener(v->saveConfiguration());
         setContentView(root);
+        renderSchools();
         if(CampusConfiguration.requiresRestart())showRestartRequired();
     }
 
@@ -100,6 +129,7 @@ public final class CampusConfigActivity extends Activity {
         final CampusSite.Profile next;
         try{next=CampusSite.create(domain.getText().toString(),vpn.getText().toString(),list.getText().toString(),portalLogin.getText().toString());}
         catch(IllegalArgumentException invalid){status.setText("配置格式不正确。请检查认证域、地址协议、所属域和端口，并移除账号、密码或登录票据。");return;}
+        if(CampusConfiguration.isUnchanged(next)){rememberSelection(next);finishWithResult(RESULT_CANCELED);return;}
         saving=true;setFormEnabled(false);status.setText("正在退出已有连接并清除网页登录状态…");
         try{
             CampusConfiguration.beginChange(this);
@@ -109,6 +139,7 @@ public final class CampusConfigActivity extends Activity {
                 main.removeCallbacks(clearDeadline);
                 try{
                     boolean restart=CampusConfiguration.save(this,next,true);
+                    rememberSelection(next);
                     saving=false;
                     finishWithResult(restart?RESULT_RESTART_REQUIRED:RESULT_OK);
                 }catch(RuntimeException failure){showSaveFailure();}
@@ -142,8 +173,10 @@ public final class CampusConfigActivity extends Activity {
         save.setText("关闭应用");
     }
     private void setFormEnabled(boolean enabled){
-        domain.setEnabled(enabled);vpn.setEnabled(enabled);list.setEnabled(enabled);portalLogin.setEnabled(enabled);consent.setEnabled(enabled);save.setEnabled(enabled);back.setEnabled(enabled);
+        domain.setEnabled(enabled);vpn.setEnabled(enabled);list.setEnabled(enabled);portalLogin.setEnabled(enabled);consent.setEnabled(enabled);save.setEnabled(enabled);back.setEnabled(enabled||importing);
         pasteImport.setEnabled(enabled);fileImport.setEnabled(enabled);
+        directoryFile.setEnabled(enabled);directoryUrl.setEnabled(enabled);schoolSearch.setEnabled(enabled);advancedButton.setEnabled(enabled);
+        for(int i=0;i<schoolRows.getChildCount();i++)schoolRows.getChildAt(i).setEnabled(enabled);
     }
     private void pasteConfiguration(){
         if(saving||importing||CampusConfiguration.requiresRestart())return;
@@ -165,21 +198,25 @@ public final class CampusConfigActivity extends Activity {
         });dialog.show();
     }
     private void chooseConfigurationFile(){
+        chooseFile(IMPORT_FILE);
+    }
+    private void chooseFile(int code){
         if(saving||importing||CampusConfiguration.requiresRestart())return;
         Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
                 .putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/json","text/plain","application/octet-stream"});
-        try{startActivityForResult(intent,IMPORT_FILE);}
+        try{startActivityForResult(intent,code);}
         catch(RuntimeException unavailable){status.setText("无法打开文件选择器，请改用粘贴配置。");}
     }
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
-        if(request!=IMPORT_FILE||result!=RESULT_OK||data==null||data.getData()==null)return;
+        if((request!=IMPORT_FILE&&request!=IMPORT_DIRECTORY)||result!=RESULT_OK||data==null||data.getData()==null)return;
         if(saving||importing||CampusConfiguration.requiresRestart())return;
         final android.net.Uri uri=data.getData();
         if(!"content".equals(uri.getScheme())){status.setText("请选择系统文件选择器提供的配置文件。");return;}
         importing=true;setFormEnabled(false);status.setText("正在读取配置文件；当前配置尚未更改…");
         imports.execute(()->{
             try(InputStream input=getContentResolver().openInputStream(uri)){
+                if(request==IMPORT_DIRECTORY){String document=SchoolDirectory.readText(input);SchoolDirectory parsed=SchoolDirectory.parse(document);main.post(()->{if(isDestroyed()||isFinishing())return;importing=false;setFormEnabled(true);status.setText("");previewDirectory(document,parsed);});return;}
                 CampusSite.Profile next=CampusConfigImport.read(input);
                 main.post(()->{if(isDestroyed()||isFinishing())return;importing=false;setFormEnabled(true);status.setText("");previewImport(next);});
             }catch(Exception failure){
@@ -201,7 +238,7 @@ public final class CampusConfigActivity extends Activity {
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("配置预览 · 尚未保存").setView(scroll)
                 .setPositiveButton("填入表单",(d,which)->{
                     domain.setText(next.domain);vpn.setText(next.vpnUrl);list.setText(next.portalListUrl);portalLogin.setText(next.loginUrl);
-                    consent.setChecked(false);status.setText("已填入表单，尚未保存。请核对入口并重新勾选连接服务说明，再点击保存。");
+                    selectedName="";selectedScope="";selectedSchool.setText("自定义校园 · 尚未保存");consent.setChecked(CampusConfiguration.isUnchanged(next));status.setText("已填入表单，尚未保存。请核对入口与连接服务说明，再点击保存。");
                 }).setNegativeButton("取消",null).create();
         dialog.setOnShowListener(ignored->dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE));dialog.show();
     }
@@ -211,6 +248,66 @@ public final class CampusConfigActivity extends Activity {
         if(!same)out.append("当前：").append(current.isEmpty()?"未填写":current).append('\n');
         out.append("导入：").append(after).append("\n\n");
     }
+    private void fillForm(CampusSite.Profile next){domain.setText(next.domain);vpn.setText(next.vpnUrl);list.setText(next.portalListUrl);portalLogin.setText(next.loginUrl);}
+    private void rememberSelection(CampusSite.Profile next){
+        String label=next.scopeId.equals(selectedScope)&&!selectedName.isEmpty()?selectedName:"自定义校园";
+        getSharedPreferences("school-selection",MODE_PRIVATE).edit().putString("name:"+next.scopeId,label).apply();
+    }
+    private void renderSchools(){
+        if(schoolRows==null)return;schoolRows.removeAllViews();String query=schoolSearch.getText().toString();
+        CampusSite.Profile current=CampusSite.current();
+        if(current.configured&&(query.trim().isEmpty()||("当前学校 "+current.domain).contains(query.trim()))){
+            Button currentRow=button("当前学校  ·  "+current.domain,false);currentRow.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);currentRow.setPadding(dp(16),0,dp(16),0);
+            currentRow.setOnClickListener(v->{if(saving||importing)return;fillForm(current);selectedScope=current.scopeId;selectedName=getSharedPreferences("school-selection",MODE_PRIVATE).getString("name:"+current.scopeId,"当前学校");selectedSchool.setText(selectedName+" · 当前使用");consent.setChecked(CampusConfiguration.hasConsent());status.setText("配置未改变，可直接继续使用。");});add(schoolRows,currentRow,4);
+        }
+        if(directory==null){add(schoolRows,text("还没有学校目录。导入提供给你的目录文件，即可按名称选校；也可展开高级配置。",14,MUTED),8);return;}
+        List<SchoolDirectory.Entry> matches=directory.search(query);int shown=0;
+        for(SchoolDirectory.Entry entry:matches){if(shown++>=20)break;
+            Button row=button(entry.name+"\n"+entry.profile.domain,false);row.setTextSize(15);row.setMinHeight(dp(64));row.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);row.setPadding(dp(16),dp(8),dp(16),dp(8));row.setEnabled(!saving&&!importing);row.setOnClickListener(v->selectSchool(entry));add(schoolRows,row,6);
+        }
+        if(matches.isEmpty())add(schoolRows,text("未找到学校。可更换关键词，或从高级配置添加。",14,MUTED),8);
+        else if(matches.size()>20)add(schoolRows,text("显示前 20 项，请输入学校名称缩小范围。",13,MUTED),8);
+    }
+    private void selectSchool(SchoolDirectory.Entry entry){
+        if(saving||importing||CampusConfiguration.requiresRestart())return;
+        CampusSite.Profile next=entry.profile;
+        String description="请核对学校公开入口。选中只填入表单，点击保存后才生效。\n\n校园连接："+next.vpnUrl+"\n\n通知列表："+next.portalListUrl+"\n\n门户登录："+next.loginUrl+"\n\n当前支持的连接与门户模板；目录不代表学校官方背书或实际连接验证。";
+        if(next.portalListUrl.startsWith("http:")||next.loginUrl.startsWith("http:"))description+="\n此配置含 HTTP 门户地址，网页传输可能未加密；自动密码登录仅可用于已确认的 HTTPS 认证页面。";
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle(entry.name).setMessage(description).setNegativeButton("取消",null).setPositiveButton("选择学校",(d,w)->{
+            fillForm(next);selectedName=entry.name;selectedScope=next.scopeId;selectedSchool.setText(entry.name+" · "+(CampusConfiguration.isUnchanged(next)?"当前使用":"待保存"));consent.setChecked(CampusConfiguration.isUnchanged(next));status.setText("已选择学校，请核对连接服务说明后继续。");
+        }).create();dialog.show();dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+    }
+    private void previewDirectory(String document,SchoolDirectory parsed){
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("导入学校目录")
+                .setMessage("目录包含 "+parsed.schools.size()+" 所学校的配置模板。确认后保存在本机并替换旧目录，可离线搜索。当前学校和登录状态保持不变；选择学校时请核对实际服务地址。")
+                .setNegativeButton("取消",null).setPositiveButton("导入目录",(d,w)->{
+                    try{new SchoolDirectoryStore(this).save(document);directory=parsed;renderSchools();status.setText("学校目录已导入，请搜索并选择学校。");}
+                    catch(Exception failure){status.setText("目录未能保存，请重试。当前校园配置未更改。");}
+                }).create();dialog.show();dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+    }
+    private void downloadDirectory(){
+        if(saving||importing||CampusConfiguration.requiresRestart())return;
+        EditText input=new EditText(this);input.setSingleLine(true);input.setHint("https://目录提供方/学校目录.json");input.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI);input.setTextSize(15);input.setSaveEnabled(false);input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(4096)});
+        LinearLayout content=column();content.setPadding(dp(20),dp(8),dp(20),0);content.addView(text("填写你信任的目录提供方地址。只下载配置数据，下载后仍需确认导入。",14,MUTED));add(content,input,12);
+        AlertDialog dialog=new AlertDialog.Builder(this).setTitle("下载学校目录").setView(content).setNegativeButton("取消",null).setPositiveButton("下载",null).create();
+        dialog.setOnShowListener(ignored->{dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            final String address;try{address=SchoolDirectory.downloadUrl(input.getText().toString());}catch(IllegalArgumentException invalid){input.setError(invalid.getMessage());return;}
+            dialog.dismiss();importing=true;setFormEnabled(false);status.setText("正在下载学校目录…");
+            imports.execute(()->{
+                try{
+                    HttpURLConnection connection=(HttpURLConnection)new URL(address).openConnection();directoryConnection=connection;
+                    connection.setInstanceFollowRedirects(false);connection.setConnectTimeout(10000);connection.setReadTimeout(10000);connection.setUseCaches(false);connection.setRequestProperty("Accept","application/json");connection.setRequestProperty("Cookie","");
+                    if(Thread.currentThread().isInterrupted()||connection.getResponseCode()!=200||connection.getContentLength()>SchoolDirectory.MAX_BYTES)throw new java.io.IOException("Invalid directory response");
+                    final long deadline=android.os.SystemClock.elapsedRealtime()+30000;
+                    final String document;
+                    try(InputStream raw=connection.getInputStream();InputStream bounded=new java.io.FilterInputStream(raw){@Override public int read(byte[] b,int off,int len)throws java.io.IOException{if(Thread.currentThread().isInterrupted()||android.os.SystemClock.elapsedRealtime()>deadline)throw new java.io.IOException("Directory timeout");return super.read(b,off,len);}}){document=SchoolDirectory.readText(bounded);}
+                    SchoolDirectory parsed=SchoolDirectory.parse(document);
+                    main.post(()->{if(isFinishing()||isDestroyed())return;importing=false;setFormEnabled(true);status.setText("");previewDirectory(document,parsed);});
+                }catch(Exception failure){main.post(()->{if(isFinishing()||isDestroyed())return;importing=false;setFormEnabled(true);status.setText("目录下载失败。请检查地址或改用文件导入；重定向和不支持的目录会被拒绝。");});}
+                finally{HttpURLConnection connection=directoryConnection;directoryConnection=null;if(connection!=null)connection.disconnect();}
+            });
+        });});dialog.show();
+    }
     private void finishWithResult(int result){
         if(getCallingActivity()==null){
             if(result==RESULT_RESTART_REQUIRED){finishAffinity();main.postDelayed(()->android.os.Process.killProcess(android.os.Process.myPid()),200);return;}
@@ -219,8 +316,8 @@ public final class CampusConfigActivity extends Activity {
         setResult(result);
         finish();
     }
-    @Override public void onBackPressed(){if(saving||importing)return;if(CampusConfiguration.requiresRestart())finishWithResult(RESULT_RESTART_REQUIRED);else super.onBackPressed();}
-    @Override protected void onDestroy(){main.removeCallbacks(clearDeadline);imports.shutdownNow();super.onDestroy();}
+    @Override public void onBackPressed(){if(saving)return;if(CampusConfiguration.requiresRestart())finishWithResult(RESULT_RESTART_REQUIRED);else super.onBackPressed();}
+    @Override protected void onDestroy(){main.removeCallbacks(clearDeadline);imports.shutdownNow();HttpURLConnection connection=directoryConnection;if(connection!=null)connection.disconnect();super.onDestroy();}
     private EditText field(LinearLayout form,String label,String hint,boolean url){
         EditText edit=new EditText(this);edit.setId(View.generateViewId());edit.setSingleLine(true);edit.setHint(hint);edit.setSaveEnabled(false);
         edit.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS|(url?InputType.TYPE_TEXT_VARIATION_URI:InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD));

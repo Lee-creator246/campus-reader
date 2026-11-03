@@ -2,12 +2,15 @@
 <resources>
     <style name="Theme.CampusReader" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#2767D8</item>
-        <item name="android:colorControlActivated">#2767D8</item>
-        <item name="android:statusBarColor">#2767D8</item>
-        <item name="android:navigationBarColor">#202124</item>
-        <item name="android:windowBackground">#F5F6F8</item>
-        <item name="android:colorButtonNormal">#FFFFFF</item>
+        <item name="android:colorAccent">@color/reader_accent</item>
+        <item name="android:colorControlActivated">@color/reader_accent</item>
+        <item name="android:statusBarColor">@color/reader_surface</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:textColorPrimary">@color/reader_ink</item>
+        <item name="android:textColorSecondary">@color/reader_muted</item>
+        <item name="android:navigationBarColor">@color/reader_ink</item>
+        <item name="android:windowBackground">@color/reader_background</item>
+        <item name="android:colorButtonNormal">@color/reader_surface</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
 </resources>

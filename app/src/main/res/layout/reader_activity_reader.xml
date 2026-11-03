@@ -2,8 +2,8 @@
 <!-- Project-authored layout, MIT. -->
 <androidx.drawerlayout.widget.DrawerLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:id="@+id/reader_drawer_layout">
     <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
-        <Toolbar android:layout_width="match_parent" android:layout_height="56dp" android:id="@+id/reader_toolbar" android:background="#FFFFFF" />
+        <Toolbar android:layout_width="match_parent" android:layout_height="60dp" android:contentInsetStart="20dp" android:contentInsetEnd="12dp" android:id="@+id/reader_toolbar" android:background="@color/reader_surface" />
         <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:id="@+id/reader_main_content" android:layout_weight="1" />
     </LinearLayout>
-    <ScrollView android:layout_width="300dp" android:layout_height="match_parent" android:id="@+id/reader_drawer_content" android:layout_gravity="start" android:background="#FFFFFF" android:fillViewport="true" />
+    <ScrollView android:layout_width="300dp" android:layout_height="match_parent" android:id="@+id/reader_drawer_content" android:layout_gravity="start" android:background="@color/reader_surface" android:fillViewport="true" />
 </androidx.drawerlayout.widget.DrawerLayout>

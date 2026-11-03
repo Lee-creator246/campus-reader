@@ -3,22 +3,39 @@ import android.content.Context;
 import android.graphics.*;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.content.res.ColorStateList;
 import android.view.View;
 import android.widget.*;
 
 /** Project-authored native presentation helpers and geometric icons, licensed under MIT. */
 public final class ReaderUi {
-    public static final int BLUE=0xff2767d8,INK=0xff202124,MUTED=0xff687078,BG=0xfff5f6f8,LINE=0xffe8eaed;
+    // Native theme tokens. XML resources mirror these values for layout inflation.
+    public static final int BLUE=0xff245bc4,INK=0xff19232d,MUTED=0xff56616f,
+            BG=0xfff4f6f8,SURFACE=0xffffffff,LINE=0xffdce2e8,TINT=0xffeaf0fc,
+            DANGER=0xffb3261e,DISABLED=0xff77818d,RIPPLE=0x20245bc4;
+    public static final String FONT="sans-serif";
     private ReaderUi(){}
     public static int dp(Context c,int value){return Math.round(value*c.getResources().getDisplayMetrics().density);}
     public static GradientDrawable background(int color,int radiusDp,Context c){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(c,radiusDp));return d;}
-    public static TextView text(Context c,String value,int size,int color){TextView t=new TextView(c);t.setText(value);t.setTextSize(size);t.setTextColor(color);return t;}
+    public static TextView text(Context c,String value,int size,int color){TextView t=new TextView(c);t.setText(value);t.setTextSize(size);t.setTextColor(color);t.setTypeface(Typeface.create(FONT,Typeface.NORMAL));return t;}
+    /** Immediate keyboard focus and pressed feedback, independent of OEM theme defaults. */
+    public static void selectable(View view){selectable(view,SURFACE);}
+    public static void selectable(View view,int surface){
+        Context c=view.getContext();StateListDrawable states=new StateListDrawable();
+        GradientDrawable focused=background(TINT,8,c);focused.setStroke(dp(c,2),BLUE);
+        states.addState(new int[]{android.R.attr.state_focused},focused);
+        states.addState(new int[]{android.R.attr.state_pressed},background(TINT,8,c));
+        states.addState(new int[]{},background(surface,8,c));
+        view.setBackground(new RippleDrawable(ColorStateList.valueOf(RIPPLE),states,null));
+        view.setFocusable(true);
+    }
     public static Drawable icon(Context c,String name,int color){return new Glyph(dp(c,24),name,color);}
     public static ImageButton iconButton(Context c,String name,String description,View.OnClickListener listener){
         ImageButton b=new ImageButton(c);b.setImageDrawable(icon(c,name,INK));b.setContentDescription(description);
         b.setScaleType(ImageView.ScaleType.CENTER);b.setPadding(0,0,0,0);b.setMinimumWidth(dp(c,48));b.setMinimumHeight(dp(c,48));
-        android.util.TypedValue value=new android.util.TypedValue();c.getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless,value,true);
-        if(value.resourceId!=0)b.setBackgroundResource(value.resourceId);else b.setBackgroundColor(Color.TRANSPARENT);
+        selectable(b);
         b.setOnClickListener(listener);return b;
     }
     private static final class Glyph extends Drawable {

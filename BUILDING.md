@@ -100,7 +100,7 @@ PowerShell 示例（将路径替换为自己的文件）：
 
 本轮发布构建使用 `:app:assembleRelease :app:lintRelease`，生成 `app/build/outputs/apk/release/app-release-unsigned.apk`。该产物须由维护者使用自己的私有签名密钥另行签名，并通过 `apksigner verify` 检查。本轮交付的本地 APK 已在仓库之外签名；源码不附该密钥。
 
-当前应用版本为 `0.6.0-campus`，版本号为 `10`，公开版应用 ID 为 `org.campusreader.reader`，Java 包名前缀为 `org.campusreader`。不同包名的安装属于独立应用，不会自动接管其他包名下的缓存或登录状态。按站点配置及账号建立缓存命名空间，不会自动将旧版仅按账号保存的数据归入新站点；同包名、同签名升级时，数据库迁移保留阅读状态并增加摘要表。
+当前应用版本为 `0.7.0-campus`，版本号为 `11`，公开版应用 ID 为 `org.campusreader.reader`，Java 包名前缀为 `org.campusreader`。不同包名的安装属于独立应用，不会自动接管其他包名下的缓存或登录状态。按站点配置及账号建立缓存命名空间，不会自动将旧版仅按账号保存的数据归入新站点；同包名、同签名升级时，数据库迁移保留阅读状态并增加摘要表。
 
 ## 配置可选 AI 摘要
 
@@ -123,7 +123,7 @@ python scripts/check_public_tree.py
 python scripts/package_source.py
 ```
 
-源码包名称为 `campus-reader-0.6.0-source.zip`，包含文件清单与校验信息，不包含 SDK、实际配置、账号、API Key、私有签名和设备数据。安装包可另命名为 `campus-reader-0.6.0.apk`；打包及签名结果以交付时的校验文件为准。
+源码包名称为 `campus-reader-0.7.0-source.zip`，包含文件清单与校验信息，不包含 SDK、实际配置、账号、API Key、私有签名和设备数据。安装包可另命名为 `campus-reader-0.7.0.apk`；打包及签名结果以交付时的校验文件为准。
 
 ## 正式发行前
 
@@ -134,3 +134,36 @@ python scripts/package_source.py
 - 门户结构、认证策略、系统电池优化等外部条件可能变化。门户失效时保留缓存，并明确提示重新认证。
 
 Windows 上若遇到 HotSpot C2 编译器崩溃，可在本次构建临时添加 `"-Dorg.gradle.jvmargs=-Xmx3g -XX:TieredStopAtLevel=1 -Dfile.encoding=UTF-8"`；这不会关闭 Lint 或测试。
+
+## 第 7 版：学校目录与门户恢复
+
+通用 APK 不附具体学校目录。首次使用可在“学校与校园配置”选择“导入学校目录”，通过系统文件选择器打开独立的目录文件，然后搜索、选择学校并保存。无需编辑 JSON。已有有效配置会显示为“当前学校”；参数不变时保存直接返回，不清除登录状态。
+
+目录也可通过用户提供的 HTTPS 地址下载并保存在本机；没有预设公共目录服务器。下载不发送校园 Cookie，不接受重定向，最多 256 KiB / 100 所学校。目录只提供连接参数，不执行脚本或授予保存密码权限；其他学校需要验证连接方案、门户解析及认证适配。
+
+目录格式（以下全部为合成示例）：
+
+```json
+{
+  "format": "campus-reader-schools",
+  "version": 1,
+  "schools": [{
+    "id": "sample",
+    "name": "示例大学",
+    "connection": "sangfor",
+    "portalAdapter": "campus-html-v1",
+    "domain": "campus.example.edu",
+    "vpnUrl": "https://vpn.campus.example.edu/",
+    "portalListUrl": "https://portal.campus.example.edu/notices",
+    "loginUrl": "https://sso.campus.example.edu/authserver/login"
+  }]
+}
+```
+
+打开时刷新、前台门户恢复默认开启，旧设置中的明确关闭值会保留；后台刷新与新通知提醒继续沿用原设置。系统通知、自启动、电池管理权限仍由系统和用户决定，SDK 服务同意仍需本人选择，AI 默认关闭。
+
+门户恢复先访问学校登录入口以复用统一认证会话。识别支持的 HTTPS CAS 表单后，手动登录页可使用学工号和门户固定密码；“记住密码”默认勾选且按钮明确标为“保存并登录”，可取消勾选。验证码、未知页面和密码错误需手动处理。保存只在本次提交后通知列表验证成功时进行；原生表单要求与当前校园连接相同的学工号，手动网页也需使用同一账号。
+
+自动恢复仅在前台、每次至多提交一次；失败或错误后暂停自动密码尝试，普通尝试有冷却。自动页 30 秒超时返回缓存。凭据密文保存在禁止备份的应用目录，按站点和账号隔离，绑定精确 HTTPS 登录主机与路径；不会保存六位校园动态密码。设置中的“删除本机门户密码”离线可用。清除密码不代表退出学校服务器端的已有会话。
+
+本轮无手机，真实 CAS 脚本提交、验证码、平台 KeyStore 和厂商连接恢复需另做设备验收。
