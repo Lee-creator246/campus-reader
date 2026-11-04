@@ -75,16 +75,25 @@ public class AiUiTest {
 
     @Before public void before(){
         app=(ShortPathApplication)RuntimeEnvironment.getApplication();
+        // Pure-module tests may clear CampusSite independently of the Android loader's static flag.
+        // Install this test's own default configuration; never rely on another sandbox's startup.
+        app.getSharedPreferences("campus-configuration",0).edit().clear().commit();
+        for(String field:new String[]{"loaded","consent","changing","restartRequired"})ReflectionHelpers.setStaticField(CampusConfiguration.class,field,false);
+        org.campusreader.config.CampusSite.clear();CampusConfiguration.load(app);
+        app.getSharedPreferences("portal-account",0).edit().clear().commit();PortalAccess.invalidate();
         app.getSharedPreferences("reader-local",0).edit().clear()
                 .putString(ReaderPreferences.lastProfileKey(),"local").commit();
         app.getSharedPreferences("reader-ai-"+SummaryInput.hash("local"),0).edit().clear().commit();
-        assertFalse(CampusConfiguration.isConfigured());
+        assertTrue(CampusConfiguration.isConfigured());
+        assertFalse(CampusConfiguration.hasConsent());
         assertFalse(CampusApplication.auth().isSdkInitialized());
     }
     @After public void after(){
         if(controller!=null)controller.pause().stop().destroy();
         shadowOf(Looper.getMainLooper()).idle();
         if(app!=null)app.dispose();
+        org.campusreader.config.CampusSite.clear();
+        ReflectionHelpers.setStaticField(CampusConfiguration.class,"loaded",false);
     }
 
     @Test public void settingsOpenDisabledAndBlankWithoutStartingConnections(){
@@ -92,7 +101,7 @@ public class AiUiTest {
                 new Intent(app,AiSettingsActivity.class).putExtra(AiSettingsActivity.EXTRA_PROFILE,"local")).setup();
         controller=opened;
         Activity activity=opened.get();
-        Switch optIn=(Switch)findText(activity,"启用手动 AI 摘要");
+        Switch optIn=(Switch)findText(activity,"启用 AI 服务");
         assertNotNull(optIn);assertFalse(optIn.isChecked());
         List<EditText> fields=new ArrayList<>();collectEditors(activity.findViewById(android.R.id.content),fields);
         assertEquals(3,fields.size());for(EditText field:fields)assertEquals("",field.getText().toString());

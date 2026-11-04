@@ -17,17 +17,19 @@ public final class CampusConfiguration {
         CampusSite.clear();
         SharedPreferences prefs = context.getSharedPreferences(STORE, Context.MODE_PRIVATE);
         consent = prefs.getBoolean("connection_sdk_consent", false);
-        if (!consent) return;
         try {
-            CampusSite.install(CampusSite.create(prefs.getString("domain", ""),
+            CampusSite.Profile saved = CampusSite.create(prefs.getString("domain", ""),
                     prefs.getString("vpn_url", ""), prefs.getString("portal_list_url", ""),
-                    prefs.getString("login_url", "")));
+                    prefs.getString("login_url", ""));
+            if (org.campusreader.config.BuptPreset.matches(saved)) CampusSite.install(saved);
+            else consent = false;
         } catch (IllegalArgumentException invalidStoredSettings) {
             consent = false;
         }
+        if (!CampusSite.isConfigured()) CampusSite.install(org.campusreader.config.BuptPreset.profile());
     }
 
-    public static boolean isConfigured() { return consent && CampusSite.isConfigured() && !changing && !restartRequired; }
+    public static boolean isConfigured() { return CampusSite.isConfigured() && !changing && !restartRequired; }
     public static boolean hasConsent() { return consent; }
     public static boolean isChanging() { return changing; }
     public static boolean requiresRestart() { return restartRequired; }
@@ -36,8 +38,19 @@ public final class CampusConfiguration {
         return isConfigured() && next != null && next.configured && CampusSite.scopeId().equals(next.scopeId);
     }
     public static void requireConnectionAllowed() {
-        if (!isConfigured()) throw new IllegalStateException(restartRequired
-                ? "校园配置已保存，请关闭应用后重新打开" : "请先填写校园配置并同意连接服务说明");
+        if (!isConfigured() || !consent) throw new IllegalStateException(restartRequired
+                ? "校园配置已保存，请关闭应用后重新打开" : "请先同意 VPN 连接服务说明");
+    }
+
+    public static void acceptConnectionConsent(Context context) {
+        requireMain();
+        if (!isConfigured()) throw new IllegalStateException("服务尚未就绪");
+        CampusSite.Profile p=CampusSite.requireConfigured();
+        if (!context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit().putString("domain",p.domain)
+                .putString("vpn_url",p.vpnUrl).putString("portal_list_url",p.portalListUrl).putString("login_url",p.loginUrl)
+                .putBoolean("connection_sdk_consent",true).commit())
+            throw new IllegalStateException("无法保存服务选择");
+        consent=true;
     }
 
     static void beginChange(Context context) {

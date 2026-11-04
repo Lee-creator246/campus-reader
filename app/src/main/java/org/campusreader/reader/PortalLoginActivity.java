@@ -19,7 +19,7 @@ import org.json.*;
 
 /** Foreground-only SSO recovery with a locally implemented, narrowly checked CAS adapter. */
 public class PortalLoginActivity extends Activity {
-    public static final String EXTRA_PROFILE="portal_profile",EXTRA_AUTOMATIC="portal_automatic",EXTRA_MANAGE="portal_manage";
+    public static final String EXTRA_PROFILE="portal_profile",EXTRA_AUTOMATIC="portal_automatic",EXTRA_MANAGE="portal_manage",EXTRA_NETWORK_FAILED="portal_network_failed";
     private final java.util.concurrent.atomic.AtomicBoolean cancelled=new java.util.concurrent.atomic.AtomicBoolean();
     private final Handler handler=new Handler(Looper.getMainLooper());
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
@@ -41,15 +41,17 @@ public class PortalLoginActivity extends Activity {
     private JSONObject form;
     private PortalCredentialStore.Credentials pending;
     private boolean pendingRemember;
+    private PortalCredentialStore.Credentials launchCredentials;private boolean launchRemember;
     private final Runnable deadline=()->{if(!closed){setStatus("门户恢复超时，可返回缓存后手动重试。");if(automatic)finish();}};
     @Override public void onCreate(Bundle state){
         super.onCreate(state);getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         automatic=getIntent().getBooleanExtra(EXTRA_AUTOMATIC,false);manage=getIntent().getBooleanExtra(EXTRA_MANAGE,false);
-        profile=getIntent().getStringExtra(EXTRA_PROFILE);site=CampusSite.scopeId();account=CampusApplication.auth().getProfileId();
-        if(profile==null||!profile.matches("campus:[a-f0-9]{64}")||!profile.equals(MediaSafety.readerProfile(account))||!CampusApplication.auth().isAccessReady()){finish();return;}
+        profile=getIntent().getStringExtra(EXTRA_PROFILE);site=CampusSite.scopeId();account=PortalAccess.account(this);
+        if(profile==null||!profile.matches("campus:[a-f0-9]{64}")||!profile.equals(MediaSafety.readerProfile(account))||!PortalAccess.isReady(this)){finish();return;}
         prefs=new ReaderPreferences(this);generation=prefs.getPortalGeneration();vault=new PortalCredentialStore(this,profile);
         if(!PortalSessionCoordinator.acquire(this,profile,automatic)){finish();return;}owned=true;
         lease=SyncGate.tryAcquire(profile);if(lease==null){finish();return;}
+        launchCredentials=PortalLoginLaunch.take(profile);launchRemember=PortalLoginLaunch.remembers(profile);PortalLoginLaunch.clear();
         build();handler.postDelayed(deadline,automatic?30_000L:180_000L);
     }
     private void build(){
@@ -88,7 +90,10 @@ public class PortalLoginActivity extends Activity {
             @Override public void onPageStarted(WebView v,String url,android.graphics.Bitmap icon){form=null;nativeForm.setVisibility(View.GONE);formScroll.setVisibility(View.GONE);}
             @Override public void onPageFinished(WebView v,String url){if(!live())return;if(CampusSite.allowsPortalUrl(url)){verify(false);return;}probe();}
             @Override public void onReceivedSslError(WebView v,SslErrorHandler h,SslError error){h.cancel();pending=null;setStatus("认证页面证书验证失败，已停止登录。");if(automatic)finish();}
-            @Override public void onReceivedError(WebView v,WebResourceRequest request,WebResourceError error){if(request.isForMainFrame()){pending=null;setStatus("登录页面加载失败，请检查校园连接后重试。");if(automatic)finish();}}
+            @Override public void onReceivedError(WebView v,WebResourceRequest request,WebResourceError error){if(request.isForMainFrame()){
+                int code=error.getErrorCode();
+                if(CampusSite.allowsPortalUrl(request.getUrl().toString())&&(code==ERROR_HOST_LOOKUP||code==ERROR_CONNECT||code==ERROR_TIMEOUT||code==ERROR_IO)){networkUnavailable();return;}
+                pending=null;setStatus("登录页面加载失败，请检查校园连接后重试。");if(automatic)finish();}}
             @Override public void onReceivedHttpError(WebView v,WebResourceRequest request,WebResourceResponse response){if(request.isForMainFrame()&&response.getStatusCode()>=400){pending=null;setStatus("认证服务暂不可用，请稍后重试。");if(automatic)finish();}}
         });
     }
@@ -111,20 +116,23 @@ public class PortalLoginActivity extends Activity {
         web.evaluateJavascript(PortalLoginPolicy.PROBE,value->{if(!live())return;try{
             Object decoded=new JSONTokener(value).nextValue();JSONObject f=new JSONObject(decoded instanceof String?(String)decoded:"{}");
             String page=f.optString("page"),action=f.optString("action");
-            if(!page.equals(web.getUrl())||!CampusSite.allowsLoginUrl(page)||!PortalLoginPolicy.accepts(page,action,f.optString("id"),f.optString("method"),f.optInt("users"),f.optInt("passwords"),f.optBoolean("execution"),f.optBoolean("event"))){
-                if(pending!=null)cancelPending();setStatus("请在学校网页使用当前校园连接的学工号登录；此页面暂不支持保存密码。切换账号请先退出校园连接。");if(automatic)finish();return;
+            if(!page.equals(web.getUrl())||!PortalAccess.isKnownLogin(page)||!PortalAccess.isKnownLogin(action)||!PortalLoginPolicy.accepts(page,action,f.optString("id"),f.optString("method"),f.optInt("users"),f.optInt("passwords"),f.optBoolean("execution"),f.optBoolean("event"))){
+                if(pending!=null)cancelPending();setStatus("请在学校网页使用上方选择的门户学工号登录；此页面暂不支持自动填写。切换账号请返回登录页。");if(automatic)finish();return;
             }
             if(f.optBoolean("challenge")||f.optBoolean("error")){
                 if(pending!=null)cancelPending();if(submitted)PortalSessionCoordinator.pause(this,profile);
-                setStatus("学校要求验证码、额外验证或更正登录信息，请在网页完成。");if(automatic)finish();return;
+                web.setVisibility(View.VISIBLE);setStatus("学校要求验证码、额外验证或更正登录信息，请在网页完成。");if(automatic)finish();return;
             }
             if(submitted&&pending!=null)cancelPending(); // Returning to a form means the earlier submit is not verified.
             form=f;target.setText("密码仅提交至："+PortalLoginPolicy.binding(page));
+            if(launchCredentials!=null&&!submitted){
+                username.setText(launchCredentials.account);password.setText(launchCredentials.password);remember.setChecked(launchRemember);launchCredentials=null;submit(false);return;
+            }
             if(automatic){
                 if(submitted){PortalSessionCoordinator.pause(this,profile);finish();return;}
                 PortalCredentialStore.Credentials saved=vault.load(page,account);
                 if(saved==null){finish();return;}username.setText(saved.account);password.setText(saved.password);submit(true);
-            }else{nativeForm.setVisibility(View.VISIBLE);formScroll.setVisibility(View.VISIBLE);setStatus("可使用上方表单登录并保存密码，也可直接使用学校网页。");}
+            }else{nativeForm.setVisibility(View.VISIBLE);formScroll.setVisibility(View.VISIBLE);web.setVisibility(View.GONE);setStatus("可使用上方表单登录并保存密码，也可直接使用学校网页。");}
         }catch(Exception unavailable){pending=null;setStatus("已保存凭据无法使用，请手动登录或删除后重新保存。");if(automatic){PortalSessionCoordinator.pause(this,profile);finish();}}});
     }
     private void submit(boolean fromSaved){
@@ -132,16 +140,16 @@ public class PortalLoginActivity extends Activity {
         try{
             String user=PortalLoginPolicy.account(username.getText().toString(),account),secret=PortalLoginPolicy.password(password.getText().toString());
             String page=form.getString("page"),action=form.getString("action"),id=form.getString("id");
-            if(!page.equals(web.getUrl())||!CampusSite.allowsLoginUrl(page)||!PortalLoginPolicy.accepts(page,action,id,form.getString("method"),form.getInt("users"),form.getInt("passwords"),form.getBoolean("execution"),form.getBoolean("event")))throw new IllegalArgumentException("认证页面已变化，请等待重新识别。");
+            if(!page.equals(web.getUrl())||!PortalAccess.isKnownLogin(page)||!PortalAccess.isKnownLogin(action)||!PortalLoginPolicy.accepts(page,action,id,form.getString("method"),form.getInt("users"),form.getInt("passwords"),form.getBoolean("execution"),form.getBoolean("event")))throw new IllegalArgumentException("认证页面已变化，请等待重新识别。");
             attempt++;pending=new PortalCredentialStore.Credentials(user,secret,PortalLoginPolicy.binding(page));pendingRemember=fromSaved||remember.isChecked();submitting=true;submitted=true;submit.setEnabled(false);
             String script=PortalLoginPolicy.submitScript(page,action,id,user,secret);password.setText("");setStatus("正在登录并验证通知访问…");
-            web.evaluateJavascript(script,result->{submitting=false;submit.setEnabled(true);if(!live())return;if(!"true".equals(result)){pending=null;setStatus("页面需要手动验证，请在下方网页继续。");if(automatic)finish();}});
+            web.evaluateJavascript(script,result->{submitting=false;submit.setEnabled(true);if(!live())return;if(!"true".equals(result)){pending=null;web.setVisibility(View.VISIBLE);setStatus("页面需要手动验证，请在下方网页继续。");if(automatic)finish();}});
         }catch(Exception invalid){setStatus(invalid instanceof IllegalArgumentException?invalid.getMessage():"认证页面已变化，请手动登录。");}
     }
     private void verify(boolean explicit){
         if(!live()||checking)return;checking=true;final long requestAttempt=attempt;
-        worker.execute(()->{boolean success=false;try{ReaderHttp.Response r=ReaderHttp.get(CampusSite.portalListUrl(),5*1024*1024,true,()->cancelled.get()||prefs.getPortalGeneration()!=generation||attempt!=requestAttempt);new CampusPortalParser().parseList(r.url,r.status,r.text());success=true;}catch(Exception ignored){}final boolean valid=success;
-            runOnUiThread(()->{checking=false;if(!live()||requestAttempt!=attempt)return;if(!valid){if(explicit)setStatus("门户尚未验证通过，请先完成学校网页登录。");else probe();return;}
+        worker.execute(()->{boolean success=false,network=false;try{ReaderHttp.Response r=ReaderHttp.get(CampusSite.portalListUrl(),5*1024*1024,true,()->cancelled.get()||prefs.getPortalGeneration()!=generation||attempt!=requestAttempt);new CampusPortalParser().parseList(r.url,r.status,r.text());success=true;}catch(Exception error){network=isTransportFailure(error);}final boolean valid=success,networkFailed=network;
+            runOnUiThread(()->{checking=false;if(!live()||requestAttempt!=attempt)return;if(!valid){if(networkFailed&&!CampusApplication.auth().isAccessReady()){networkUnavailable();return;}if(explicit)setStatus("门户尚未验证通过，请先完成学校网页登录。");else probe();return;}
                 if(!prefs.markPortalSessionIfCurrent(profile,generation))return;
                 CookieManager.getInstance().flush();CampusApplication.auth().clearPortalAuthenticationRequired();PortalSessionCoordinator.success(this,profile);
                 if(pending!=null){try{if(pendingRemember)vault.save(pending.account,pending.password,pending.binding);else vault.clear();}catch(Exception failure){setStatus("登录已成功，但系统安全存储不可用，密码未保存。");android.widget.Toast.makeText(this,"登录成功，密码未保存",Toast.LENGTH_LONG).show();}finally{pending=null;}}
@@ -150,10 +158,15 @@ public class PortalLoginActivity extends Activity {
             });
         });
     }
-    private boolean live(){return !closed&&resumed&&!isFinishing()&&site.equals(CampusSite.scopeId())&&profile.equals(MediaSafety.readerProfile(CampusApplication.auth().getProfileId()))&&CampusApplication.auth().isAccessReady()&&prefs.getPortalGeneration()==generation;}
-    @Override protected void onResume(){super.onResume();resumed=true;if(web!=null&&web.getUrl()==null&&live())web.loadUrl(upgradeLoginUrl(CampusSite.loginUrl()));}
+    static boolean isTransportFailure(Throwable error){return error instanceof java.net.UnknownHostException||error instanceof java.net.ConnectException||error instanceof java.net.SocketTimeoutException;}
+    private void networkUnavailable(){
+        if(pending!=null)PortalLoginLaunch.put(profile,pending.account,pending.password,pendingRemember);
+        setResult(RESULT_CANCELED,new Intent().putExtra(EXTRA_NETWORK_FAILED,true));finish();
+    }
+    private boolean live(){return !closed&&resumed&&!isFinishing()&&site.equals(CampusSite.scopeId())&&profile.equals(PortalAccess.currentProfile(this))&&PortalAccess.isReady(this)&&prefs.getPortalGeneration()==generation;}
+    @Override protected void onResume(){super.onResume();resumed=true;if(web!=null&&web.getUrl()==null&&live())web.loadUrl(upgradeLoginUrl(PortalAccess.loginUrl()));}
     @Override protected void onPause(){cancelled.set(true);resumed=false;cancelPending();if(web!=null)web.stopLoading();super.onPause();if(!isFinishing())finish();}
-    @Override protected void onDestroy(){cancelled.set(true);closed=true;pending=null;handler.removeCallbacksAndMessages(null);worker.shutdownNow();if(password!=null)password.setText("");if(web!=null){web.stopLoading();web.destroy();web=null;}if(lease!=null)lease.close();if(owned)PortalSessionCoordinator.finished(profile);super.onDestroy();}
+    @Override protected void onDestroy(){cancelled.set(true);closed=true;pending=null;launchCredentials=null;handler.removeCallbacksAndMessages(null);worker.shutdownNow();if(password!=null)password.setText("");if(web!=null){web.stopLoading();web.destroy();web=null;}if(lease!=null)lease.close();if(owned)PortalSessionCoordinator.finished(profile);super.onDestroy();}
     private int dp(int value){return (int)(getResources().getDisplayMetrics().density*value+.5f);}
     private TextView text(String value,int size){TextView v=new TextView(this);v.setText(value);v.setTextSize(size);v.setTextColor(ReaderUi.INK);v.setGravity(Gravity.CENTER_VERTICAL);return v;}
     private EditText field(String hint,int type){EditText v=new EditText(this);v.setHint(hint);v.setTextSize(16);v.setSingleLine(true);v.setInputType(type);v.setSaveEnabled(false);if(Build.VERSION.SDK_INT>=26)v.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);nativeForm.addView(v,new LinearLayout.LayoutParams(-1,dp(52)));return v;}

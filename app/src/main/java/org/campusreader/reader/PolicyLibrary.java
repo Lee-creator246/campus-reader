@@ -102,13 +102,17 @@ public final class PolicyLibrary {
             if(data.length>MAX_LIBRARY_BYTES)throw new IllegalArgumentException("资料库已达到本机容量上限");
             // Fail closed: old outputs and in-flight generations are invalid before any policy change.
             new AiSettings(context,profile).invalidateRequests();
-            try(CampusNoticeStore store=new CampusNoticeStore(context,profile)){store.clearSummaries();}
+            try(CampusNoticeStore store=new CampusNoticeStore(context,profile)){
+                AiCoreCache.preserve(store,new AiSettings(context,profile).cacheConfig(),read());
+                store.clearSummaries();
+            }
             // A cancelled verification may follow a successful disk commit. Never leave the
             // pre-commit snapshot in memory; the next reader must discover actual disk state.
             CACHE.remove(file.getBaseFile().getAbsolutePath());
             FileOutputStream output=null;try{output=file.startWrite();output.write(data);file.finishWrite(output);}catch(IOException error){if(output!=null)file.failWrite(output);throw error;}
             try(InputStream verify=file.openRead()){if(!Arrays.equals(data,PolicyImport.readBounded(verify,MAX_LIBRARY_BYTES)))throw new IOException("Policy persistence verification failed");}
             CACHE.put(file.getBaseFile().getAbsolutePath(),new Snapshot(oldRevision+1,docs));
+            AiAutoSummaries.resultUpdated(context);
         }catch(IOException|JSONException failure){throw new IllegalStateException("政策资料未能保存，请检查本机存储空间后重试",failure);}
     }
     private static void validateTotal(List<Document> docs){int size=0;for(Document doc:docs)for(String page:doc.pages){size+=page.length();if(size>MAX_TOTAL_CHARS)throw new IllegalArgumentException("资料库文字总量最多 1000000 字符，请先清理旧资料");}}

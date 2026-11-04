@@ -29,10 +29,10 @@ final class ReaderHttp {
         }
     }
     static final class RequestGuard {
-        private final String profile;private final boolean campusOnly;private final Thread owner;
+        private final String profile;private final boolean campusOnly;private final Thread owner;private final long accessRevision;
         private final java.util.function.BooleanSupplier cancelled;
-        RequestGuard(String profile,boolean campusOnly,Thread owner,java.util.function.BooleanSupplier cancelled){this.profile=profile;this.campusOnly=campusOnly;this.owner=owner;this.cancelled=cancelled;}
-        void check()throws IOException{if(owner.isInterrupted()||cancelled.getAsBoolean())throw new IOException("Request cancelled");if(campusOnly)requireCampusSession(profile);}
+        RequestGuard(String profile,boolean campusOnly,Thread owner,java.util.function.BooleanSupplier cancelled){this.accessRevision=PortalAccess.revision();this.profile=profile;this.campusOnly=campusOnly;this.owner=owner;this.cancelled=cancelled;}
+        void check()throws IOException{if(owner.isInterrupted()||cancelled.getAsBoolean())throw new IOException("Request cancelled");if(campusOnly){if(accessRevision!=PortalAccess.revision())throw new IOException("Request cancelled");requireCampusSession(profile);}}
     }
     static Response get(String address,int byteLimit,boolean campusOnly)throws IOException{return get(address,byteLimit,campusOnly,()->false);}
     static Response get(String address,int byteLimit,boolean campusOnly,java.util.function.BooleanSupplier cancelled) throws IOException {
@@ -42,7 +42,7 @@ final class ReaderHttp {
         for(int redirects=0;redirects<=5;redirects++) {
             guard.check();
             current=checked(current.toString(),campusOnly);
-            HttpURLConnection connection=(HttpURLConnection)current.openConnection();
+            HttpURLConnection connection=PortalAccess.openConnection(current);
             try {
                 connection.setConnectTimeout(15000); connection.setReadTimeout(20000);
                 connection.setInstanceFollowRedirects(false); connection.setRequestProperty("User-Agent",USER_AGENT);
@@ -87,7 +87,7 @@ final class ReaderHttp {
     private static void requireCampusSession(String profile) throws IOException {
         if(!CampusConfiguration.isConfigured())throw new MediaSafety.Rejected("ACCOUNT_CHANGED");
         if(!profile.startsWith("campus:")||!MediaActions.currentProfile(profile))throw new MediaSafety.Rejected("ACCOUNT_CHANGED");
-        if(!CampusApplication.auth().isAccessReady())throw new MediaSafety.Rejected("CAMPUS_OFFLINE");
+        if(!PortalAccess.isReady())throw new MediaSafety.Rejected("CAMPUS_OFFLINE");
     }
     /** Await the WebView cookie write before following a renewal redirect or issuing another request. */
     static void persistCookie(RequestGuard guard,String url,String value)throws IOException {

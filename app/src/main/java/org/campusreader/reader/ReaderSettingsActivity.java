@@ -52,6 +52,7 @@ public final class ReaderSettingsActivity extends Activity {
         interval=select(sync,"刷新间隔",new String[]{"15 分钟","30 分钟","1 小时","3 小时","6 小时"},index(minutes,prefs.getIntervalMinutes()));
         wifi=toggle(sync,"仅在 Wi-Fi 下刷新","减少后台移动数据使用",prefs.isWifiOnly());
         notifications=toggle(sync,"新通知提醒","有新内容时在通知栏提醒",prefs.isNotificationsEnabled());
+        action(sync,"关注偏好与推荐","主题、关注词、屏蔽词及本机推荐学习",()->startActivity(new android.content.Intent(this,InterestsActivity.class).putExtra(InterestsActivity.EXTRA_PROFILE,profile)),false);
         note(notificationsPage,"后台刷新由系统安排，省电模式可能使其延迟。认证失效后，打开 App 可尝试恢复；需要验证码时仍须本人完成。修改后请点右上角“保存”。");
         section(notificationsPage,"门户账号");LinearLayout credentials=group(notificationsPage);
         action(credentials,"删除本机门户密码","离线也可删除；保留通知与阅读状态",()->new AlertDialog.Builder(this).setTitle("删除已保存的门户密码？")
@@ -63,7 +64,7 @@ public final class ReaderSettingsActivity extends Activity {
         action(access,"发送测试通知","按已保存的提醒设置发送一条测试",()->Toast.makeText(this,ReaderNotifications.postTest(this)?"测试通知已发出，请查看通知栏":"通知未获允许或已关闭；请先保存设置并检查系统权限",Toast.LENGTH_LONG).show(),false);
         action(access,"电池与后台运行设置","查看系统对后台活动的限制",()->SettingsSupport.openBatterySettings(this),false);
         action(access,"自启动设置说明","不同手机的设置位置可能不同",()->new AlertDialog.Builder(this).setTitle("允许后台运行 / 自启动")
-                .setMessage("请在本机应用信息或电池管理中，为校园阅读允许后台活动、自启动（若有此项）。强行停止后需重新打开 App，才能恢复定时任务。系统设置不会由 App 自动开启。")
+                .setMessage("请在应用信息或电池管理中，为北邮人信息允许后台活动、自启动（若有此项）。在最近任务界面查看本应用菜单，按需使用“锁定”。\n\n这些操作由你在系统中完成，可减少限制，仍不能保证进程永久运行。强行停止后需重新打开 App，才能恢复任务。通知权限、登录状态和网络也会影响到达。")
                 .setPositiveButton("打开应用信息",(d,w)->SettingsSupport.openAppDetails(this)).setNegativeButton("返回",null).show(),false);
 
         LinearLayout offline=category();section(offline,"阅读缓存");LinearLayout cache=group(offline);
@@ -80,9 +81,10 @@ public final class ReaderSettingsActivity extends Activity {
                 .setPositiveButton("清理正文缓存",(d,w)->clean(true)).setNegativeButton("取消",null).show(),true);
         action(storage,"下载文件管理","查看、导出或清理图片与附件",()->MediaActions.viewDownloads(this),false);
 
-        LinearLayout about=category();section(about,"校园阅读");
-        note(about,"校园阅读  0.7.0-campus\n信息门户与本地阅读管理。");
+        LinearLayout about=category();section(about,"北邮人信息");
+        note(about,"北邮人信息  "+version()+"\n信息门户、偏好推荐与本地阅读管理。");
         note(about,"通知缓存、已读、稍后读和标签保存在本机。校园连接和信息门户登录可从侧边栏进入。");
+        action(about,"自愿填写体验问卷","仅在本机填写，可预览后自行分享",()->startActivity(new android.content.Intent(this,SurveyActivity.class).putExtra(SurveyActivity.EXTRA_PROFILE,profile)),false);
         showCategories();
         worker.execute(()->{
             try(CampusNoticeStore store=new CampusNoticeStore(this,profile)){
@@ -125,10 +127,12 @@ public final class ReaderSettingsActivity extends Activity {
     private void clean(boolean all){worker.execute(()->{int count;try(CampusNoticeStore store=new CampusNoticeStore(this,profile)){count=all?store.clearBodies():store.clearReadBodies();}ImageCacheMaintenance.prune(this,profile);updateUsage();int cleared=count;runOnUiThread(()->Toast.makeText(this,"已清理 "+cleared+" 篇正文，阅读状态和标签保留",Toast.LENGTH_LONG).show());});}
     private void updateUsage(){
         try(CampusNoticeStore store=new CampusNoticeStore(this,profile)){
-            CacheStats s=store.stats();String value="完整正文   "+s.cachedBodies+" 篇，"+mb(s.bodyBytes)+" MiB\n阅读图片   "+mb(ImageCacheMaintenance.size(this,profile))+" MiB\n轻量历史   "+s.totalEntries+" 条（含已清正文的记录）\n通知权限   "+(ReaderNotifications.canPost(this)?"已允许":"未允许，请打开系统通知权限")+"\n后台间隔   "+prefs.getIntervalMinutes()+" 分钟\n最近刷新   "+(prefs.getLastAttemptMillis()==0?"尚未执行":android.text.format.DateFormat.format("MM-dd HH:mm",prefs.getLastAttemptMillis())+"  "+resultText(prefs.getLastResult()));
+            CacheStats s=store.stats();long success=prefs.getLastSuccessfulMillis(profile);String value="完整正文   "+s.cachedBodies+" 篇，"+mb(s.bodyBytes)+" MiB\n阅读图片   "+mb(ImageCacheMaintenance.size(this,profile))+" MiB\n轻量历史   "+s.totalEntries+" 条（含已清正文的记录）\n通知权限   "+(ReaderNotifications.canPost(this)?"已允许":"未允许，请打开系统通知权限")+"\n电池限制   "+batteryState()+"\n后台间隔   "+prefs.getIntervalMinutes()+" 分钟（系统择机执行）\n最近成功   "+(success==0?"尚无完整成功记录":android.text.format.DateFormat.format("MM-dd HH:mm",success))+"\n最近尝试   "+(prefs.getLastAttemptMillis(profile)==0?"尚未执行":android.text.format.DateFormat.format("MM-dd HH:mm",prefs.getLastAttemptMillis(profile))+"  "+resultText(prefs.getLastResult(profile)));
             runOnUiThread(()->{if(!isDestroyed())usage.setText(value);});
         }catch(RuntimeException error){runOnUiThread(()->{if(!isDestroyed())usage.setText("暂时无法读取缓存用量，请返回后重试。");});}
     }
+    private String batteryState(){try{android.os.PowerManager power=(android.os.PowerManager)getSystemService(POWER_SERVICE);return power!=null&&power.isIgnoringBatteryOptimizations(getPackageName())?"已忽略系统电池优化；厂商设置仍需自行检查":"受系统电池优化管理，可查看后台设置";}catch(RuntimeException unavailable){return "请在系统中检查";}}
+    private String version(){try{return getPackageManager().getPackageInfo(getPackageName(),0).versionName;}catch(android.content.pm.PackageManager.NameNotFoundException impossible){return "";}}
     private static String resultText(String code){switch(code){case "SUCCESS":return "成功";case "PARTIAL":return "部分成功";case "TUNNEL_REQUIRED":return "等待校园连接";case "PORTAL_LOGIN_REQUIRED":return "等待门户登录";case "BUSY":return "已有刷新进行中";case "CANCELLED":return "已停止";default:return "未完成，请检查网络或登录";}}
     private static String mb(long bytes){return String.format(java.util.Locale.ROOT,"%.1f",bytes/1048576.0);}
     private int dp(int n){return ReaderUi.dp(this,n);}

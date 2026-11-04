@@ -17,7 +17,7 @@ public final class NotificationHistory {
         REFRESH, NO_NEW_ITEMS, FOREGROUND_ONLY, ACCOUNT_CHANGED, MISSING, ALREADY_READ, BLOCKED,
         APP_DISABLED, PERMISSION_DENIED, SYSTEM_DISABLED, CHANNEL_DISABLED, RULES_ERROR,
         NORMAL_SUBMITTED, PRIORITY_SUBMITTED, POST_FAILED, SESSION_SUBMITTED, SESSION_ALREADY_REMINDED,
-        BACKGROUND_DISABLED, WIFI_REQUIRED, JOB_STOPPED, INTERNAL_ERROR
+        BACKGROUND_DISABLED, WIFI_REQUIRED, JOB_STOPPED, INTERNAL_ERROR, INITIAL_SYNC, ALREADY_DELIVERED
     }
     public static final class Entry {
         public final long timeMillis;
@@ -85,7 +85,8 @@ public final class NotificationHistory {
         case APP_DISABLED:return "应用内提醒已关闭";case PERMISSION_DENIED:return "未授予通知权限";case SYSTEM_DISABLED:return "系统已关闭应用通知";case CHANNEL_DISABLED:return "该通知渠道已关闭";
         case RULES_ERROR:return "规则或缓存无法读取，已停止提醒";case NORMAL_SUBMITTED:return "普通提醒已提交系统";case PRIORITY_SUBMITTED:return "优先提醒已提交系统";
         case POST_FAILED:return "提交系统失败";case SESSION_SUBMITTED:return "连接提醒已提交系统";case SESSION_ALREADY_REMINDED:return "连接提醒已合并，不重复发送";
-        case BACKGROUND_DISABLED:return "后台刷新已关闭";case WIFI_REQUIRED:return "等待 Wi-Fi，未请求网络";case JOB_STOPPED:return "系统停止本次后台任务";default:return "本次后台检查未完成";
+        case BACKGROUND_DISABLED:return "后台刷新已关闭";case WIFI_REQUIRED:return "等待 Wi-Fi，未请求网络";case JOB_STOPPED:return "系统停止本次后台任务";
+        case INITIAL_SYNC:return "首次同步建立基线，未批量提醒历史通知";case ALREADY_DELIVERED:return "该通知已经提醒，未重复发送";default:return "本次后台检查未完成";
     }}
     public static String statusText(String status){try{switch(CampusSyncEngine.Status.valueOf(status)){
         case SUCCESS:return "成功";case PARTIAL:return "部分完成";case BUSY:return "已有刷新任务";case NO_PROFILE:return "尚未选择账号";case TUNNEL_REQUIRED:return "校园通道未就绪";

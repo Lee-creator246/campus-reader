@@ -33,7 +33,7 @@ public class AiProviderUiTest {
             find(activity.findViewById(android.R.id.content),"使用 DeepSeek 官方预设").performClick();
             List<EditText> fields=new ArrayList<>();editors(activity.findViewById(android.R.id.content),fields);
             assertEquals(3,fields.size());assertEquals(AiProvider.DEEPSEEK.defaultEndpoint,fields.get(0).getText().toString());assertEquals(AiProvider.DEEPSEEK.defaultModel,fields.get(1).getText().toString());assertEquals("",fields.get(2).getText().toString());
-            assertFalse(((Switch)find(activity.findViewById(android.R.id.content),"启用手动 AI 摘要")).isChecked());
+            assertFalse(((Switch)find(activity.findViewById(android.R.id.content),"启用 AI 服务")).isChecked());
             AiSettings settings=new AiSettings(app,"local");assertEquals("",settings.endpoint());assertEquals(AiProvider.CUSTOM,settings.provider());assertFalse(settings.hasKey());assertEquals(0,settings.usedToday());assertFalse(CampusApplication.auth().isSdkInitialized());
             find(activity.findViewById(android.R.id.content),"保存设置").performClick();
             assertEquals(AiProvider.DEEPSEEK,settings.provider());assertEquals(AiProvider.DEEPSEEK.defaultEndpoint,settings.endpoint());assertFalse(settings.enabled());assertFalse(settings.hasKey());assertEquals(0,settings.usedToday());

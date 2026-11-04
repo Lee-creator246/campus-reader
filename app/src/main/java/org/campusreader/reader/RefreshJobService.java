@@ -34,7 +34,7 @@ public final class RefreshJobService extends JobService {
                         ()->run.stopped.get()||!new ReaderPreferences(this).isBackgroundEnabled()||skipNetwork
                             ||(new ReaderPreferences(this).isWifiOnly()&&!RefreshScheduler.wifiConnected(this)));
                 if(!run.stopped.get()){
-                    if(prefs.isBackgroundEnabled()&&requestedProfile.equals(CampusSyncEngine.currentProfile()))ReaderNotifications.publishResult(this,result);
+                    if(prefs.isBackgroundEnabled()&&requestedProfile.equals(CampusSyncEngine.currentProfile())){ReaderNotifications.publishResult(this,result);AiAutoSummaries.kick(this);}
                 }
             }catch(RuntimeException error){NotificationHistory.record(this,run.profile,NotificationHistory.Reason.INTERNAL_ERROR,null,null,null,null);android.util.Log.w("CampusSync","Background attempt failed");}
             finally{main.post(()->{if(active==run){active=null;if(!run.stopped.get())jobFinished(run.params,false);}});}

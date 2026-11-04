@@ -14,7 +14,7 @@ public final class ConsentStorageProvider extends HSProvider {
     @Override public synchronized Bundle call(String method, String argument, Bundle extras) {
         // This provider and the VPN service run in the main application process. Before the
         // SDK has been initialized, the original provider also returns an empty result.
-        if (!CampusConfiguration.isConfigured() || !CampusSdk.isInitialized()) return Bundle.EMPTY;
+        if (!CampusConfiguration.isConfigured() || !CampusConfiguration.hasConsent() || !CampusSdk.isInitialized()) return Bundle.EMPTY;
         if (!vendorCreated) {
             // Keep the same Android Transport and caller attribution for vendor caller checks.
             // This AAR's HSProvider constructor only invokes ContentProvider's constructor;

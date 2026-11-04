@@ -75,4 +75,10 @@ public class AiSettingsTest {
         try{settings.save(false,"https://evil.example.org/chat/completions","model","",AiProvider.DEEPSEEK);fail();}catch(IllegalArgumentException expected){}
         assertEquals(AiProvider.DEEPSEEK.defaultEndpoint,settings.endpoint());assertEquals(revision,settings.load().revision);
     }
+    @Test public void dailyLimitCanChangeWithoutResettingAttemptsOrInvalidatingService(){
+        prefs.edit().putBoolean("enabled",true).putString("endpoint","https://api.example.org/v1/chat/completions").putString("model","model").commit();AiSettings.Config config=settings.load();assertEquals(20,settings.dailyLimit());
+        settings.setDailyLimit(1);assertTrue(settings.reserve(config));assertFalse(settings.reserve(config));settings.setDailyLimit(3);assertEquals(1,settings.usedToday());assertTrue(settings.isCurrent(config));assertTrue(settings.reserve(config));assertEquals(2,settings.usedToday());
+        settings.setDailyLimit(1);assertFalse(settings.reserve(config));assertEquals(2,settings.usedToday());
+    }
+    @Test public void invalidDailyLimitDoesNotChangeSavedValue(){for(int invalid:new int[]{0,-1,101})try{settings.setDailyLimit(invalid);fail();}catch(IllegalArgumentException expected){}assertEquals(20,settings.dailyLimit());}
 }

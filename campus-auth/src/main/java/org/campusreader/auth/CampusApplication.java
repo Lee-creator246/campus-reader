@@ -25,7 +25,7 @@ public class CampusApplication extends Application {
                     // A scheduled job may create Application without a visible screen. Only a
                     // user-visible activity may start SDK restoration / Android VPN consent.
                     if (activity instanceof CampusConfigActivity) return;
-                    controller.restoreSessionIfPossible();
+                    if (activity instanceof CampusAuthActivity) controller.restoreSessionIfPossible();
                     controller.synchronizeSdkState();
                 }
                 @Override public void onActivityCreated(Activity activity, Bundle state) {}
@@ -37,6 +37,7 @@ public class CampusApplication extends Application {
             });
         }
     }
+    public static Context context() { return instance; }
     public static CampusAuthController auth() {
         if (instance == null || instance.controller == null) throw new IllegalStateException("CampusApplication is not initialized");
         return instance.controller;

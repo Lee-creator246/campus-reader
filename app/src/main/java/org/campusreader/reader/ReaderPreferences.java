@@ -16,7 +16,7 @@ public final class ReaderPreferences {
     public boolean isPortalAutoRestoreEnabled(){return prefs.getBoolean("portalAutoRestore",true);}
     public void setPortalAutoRestoreEnabled(boolean value){prefs.edit().putBoolean("portalAutoRestore",value).apply();}
     public void setBackgroundEnabled(boolean value){prefs.edit().putBoolean("background",value).apply();}
-    public int getIntervalMinutes(){return SyncGate.intervalMinutes(prefs.getInt("interval",60));}
+    public int getIntervalMinutes(){return SyncGate.intervalMinutes(prefs.getInt("interval",30));}
     public void setIntervalMinutes(int value){prefs.edit().putInt("interval",SyncGate.intervalMinutes(value)).apply();}
     public boolean isWifiOnly(){return prefs.getBoolean("wifiOnly",false);}
     public void setWifiOnly(boolean value){prefs.edit().putBoolean("wifiOnly",value).apply();}

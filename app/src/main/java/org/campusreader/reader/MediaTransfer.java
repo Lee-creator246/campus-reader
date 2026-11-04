@@ -62,11 +62,11 @@ final class MediaTransfer {
                     return commit(context, profile, profileHash, id, temporary, hint, imageMime(temporary));
                 }
             }
-            if (campus && !CampusApplication.auth().isAccessReady()) throw new MediaSafety.Rejected("CAMPUS_OFFLINE");
+            if (campus && !PortalAccess.isReady(context)) throw new MediaSafety.Rejected("CAMPUS_OFFLINE");
             URL current = original;
             for (int redirects=0; redirects <= 5; redirects++) {
                 requireProfile(profile);requestGuard.check();
-                HttpURLConnection connection = (HttpURLConnection) current.openConnection();
+                HttpURLConnection connection = PortalAccess.openConnection(current);
                 try {
                     connection.setConnectTimeout(15000); connection.setReadTimeout(20000); connection.setInstanceFollowRedirects(false);
                     connection.setRequestProperty("User-Agent", ReaderHttp.USER_AGENT);

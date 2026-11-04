@@ -23,7 +23,7 @@ final class PortalLoginPolicy {
     }
     static String account(String input,String campusAccount) {
         String value=input==null?"":input.trim();
-        if(value.isEmpty()||value.length()>128||!value.equals(campusAccount))throw new IllegalArgumentException("请使用当前校园连接的学工号");
+        if(value.isEmpty()||value.length()>128||!value.equals(campusAccount))throw new IllegalArgumentException("请使用当前选择的门户学工号");
         return value;
     }
     static String password(String input){if(input==null||input.isEmpty()||input.length()>1024)throw new IllegalArgumentException("请输入门户密码");return input;}

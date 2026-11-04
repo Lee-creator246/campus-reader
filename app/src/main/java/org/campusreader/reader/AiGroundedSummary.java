@@ -36,6 +36,7 @@ public final class AiGroundedSummary {
             +"恰有 schema、fields、tags、policy_links 四个顶层字段，schema 为数字2。JSON格式示例（所有字段可为空）："
             +"{\"schema\":2,\"fields\":{\"purpose\":[],\"audience\":[],\"actions\":[],\"deadline\":[],\"location\":[],\"materials\":[],\"conditions\":[]},\"tags\":[],\"policy_links\":[]}";}
     public static AiGroundedSummary parse(String json,AiEvidence.Snapshot source)throws JSONException{return parse(json,source,false);}
+    static void validateJson(String json)throws JSONException{new JsonShape(json).validate();}
     public static AiGroundedSummary parseCached(String json,AiEvidence.Snapshot source)throws JSONException{return parse(json,source,true);}
     private static AiGroundedSummary parse(String json,AiEvidence.Snapshot source,boolean cached)throws JSONException{
         if(json==null||json.trim().isEmpty()||json.getBytes(StandardCharsets.UTF_8).length>AiPolicy.MAX_RESULT_BYTES)throw new JSONException("Summary size");

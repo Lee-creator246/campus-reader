@@ -13,7 +13,7 @@ public final class CampusAccount {
                 throw new IllegalArgumentException("请选择当前校园账号认证域");
             account = account.substring(0, at);
         }
-        if (account.isEmpty() || account.chars().anyMatch(Character::isWhitespace)) throw new IllegalArgumentException("请输入有效学工号");
+        if (account.isEmpty() || account.length()>128 || account.chars().anyMatch(c->Character.isWhitespace(c)||Character.isISOControl(c))) throw new IllegalArgumentException("请输入有效学工号");
         return account;
     }
     public static String sdkUsername(String input) { CampusSite.requireConfigured(); return profileId(input) + "@" + CampusSite.domain(); }

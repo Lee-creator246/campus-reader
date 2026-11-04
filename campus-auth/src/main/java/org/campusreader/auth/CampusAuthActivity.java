@@ -59,12 +59,12 @@ public final class CampusAuthActivity extends Activity implements CampusAuthCont
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         LinearLayout page=column();page.setPadding(dp(20),dp(24),dp(20),dp(24));scroll.addView(page);
         TextView school=text("校园访问",22,INK);school.setTypeface(Typeface.DEFAULT,Typeface.BOLD);page.addView(school);
-        TextView explanation=text("第 1 步：用校园账号和动态密码建立访问通道。\n第 2 步：返回阅读页检查或单独登录信息门户。两步都就绪后才能同步，门户密码不会交给校园连接界面。",14,MUTED);explanation.setLineSpacing(dp(3),1);add(page,explanation,8);
+        TextView explanation=text("使用企业微信校园网应用中的动态密码建立校外访问通道。完成后自动返回门户登录；门户密码与 VPN 动态密码分别使用。",14,MUTED);explanation.setLineSpacing(dp(3),1);add(page,explanation,8);
 
         LinearLayout form=card();add(page,form,24);
         account=new EditText(this);account.setId(View.generateViewId());account.setHint("请输入学工号");account.setSingleLine(true);account.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);styleInput(account);
         account.setSaveEnabled(false);
-        TextView accountLabel=text("学工号",14,INK);accountLabel.setLabelFor(account.getId());form.addView(accountLabel);add(form,account,8);account.setText(auth.getProfileId());
+        TextView accountLabel=text("学工号",14,INK);accountLabel.setLabelFor(account.getId());form.addView(accountLabel);add(form,account,8);account.setText(auth.isAccessReady()||getIntent().getStringExtra("portalAccount")==null?auth.getProfileId():getIntent().getStringExtra("portalAccount"));
         password=new EditText(this);password.setId(View.generateViewId());password.setHint("请输入六位动态密码");password.setSingleLine(true);password.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_VARIATION_PASSWORD);styleInput(password);
         password.setSaveEnabled(false);if(android.os.Build.VERSION.SDK_INT>=26)password.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
         TextView passwordLabel=text("六位动态密码",14,INK);passwordLabel.setLabelFor(password.getId());add(form,passwordLabel,20);add(form,password,8);
@@ -92,6 +92,11 @@ public final class CampusAuthActivity extends Activity implements CampusAuthCont
         cancel.setOnClickListener(v->{auth.cancel();challengeBox.removeAllViews();challengeBox.setVisibility(View.GONE);});
         disconnect.setOnClickListener(v->{auth.disconnect();challengeBox.removeAllViews();challengeBox.setVisibility(View.GONE);});
         setContentView(root);
+        if(!CampusConfiguration.hasConsent())new android.app.AlertDialog.Builder(this)
+            .setTitle("校外 VPN 连接")
+            .setMessage("直连暂不可用时，通过学校 aTrust 连接服务访问门户。连接服务由第三方 SDK 提供，可能处理设备与网络信息；校园动态密码不保存在本机。是否启用？")
+            .setPositiveButton("同意并继续",(d,w)->{CampusConfiguration.acceptConnectionConsent(this);auth.restoreSessionIfPossible();})
+            .setNegativeButton("暂不连接",(d,w)->finish()).setOnCancelListener(d->finish()).show();
     }
     @Override protected void onResume(){super.onResume();if(auth!=null)auth.setListener(this);}
     @Override protected void onPause(){if(auth!=null)auth.removeListener(this);super.onPause();}

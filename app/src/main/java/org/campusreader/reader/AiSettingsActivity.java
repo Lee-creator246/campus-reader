@@ -18,6 +18,8 @@ public final class AiSettingsActivity extends Activity {
     private String profile;
     private AiSettings settings;
     private Switch enabled;
+    private CheckBox automatic,automaticPolicies;
+    private SeekBar dailyLimit;
     private EditText endpoint,model,key;
     private AiProvider provider;
     private TextView providerLabel;
@@ -32,35 +34,43 @@ public final class AiSettingsActivity extends Activity {
         ScrollView scroll=new ScrollView(this);scroll.addView(page);setContentView(scroll);
         button(page,"‹ 返回阅读",this::finish);
         note(page,"AI 摘要服务",23,ReaderUi.INK);
-        note(page,"默认关闭，仅在单篇通知内由你核对资料并确认后发送文字，可包含你选中的政策片段。不发送校园登录凭据。校内内容会交给所选服务方处理，请仅使用可信服务并确认有权发送。",14,ReaderUi.MUTED);
-        enabled=new Switch(this);enabled.setText("启用手动 AI 摘要");enabled.setChecked(settings.enabled());enabled.setMinHeight(dp(56));page.addView(enabled);
+        note(page,"配置服务后，可一次授权自动摘要：当前页和新通知的文字将发送给所选服务。未启用自动摘要时，仍可逐篇预览并确认。校园密码、画像、图片和附件文件不发送。",14,ReaderUi.MUTED);
+        enabled=new Switch(this);enabled.setText("启用 AI 服务");enabled.setChecked(settings.enabled());enabled.setMinHeight(dp(56));page.addView(enabled);
+        automatic=new CheckBox(this);automatic.setText("自动摘要：允许发送当前页和新增通知文字");automatic.setChecked(settings.automaticEnabled());automatic.setMinHeight(dp(48));page.addView(automatic);
+        automaticPolicies=new CheckBox(this);automaticPolicies.setText("自动摘要时，允许发送检索命中的政策片段及其资料信息");automaticPolicies.setChecked(settings.automaticPolicies());automaticPolicies.setMinHeight(dp(48));page.addView(automaticPolicies);
         providerLabel=note(page,"当前接口："+provider.label,14,ReaderUi.INK);
         button(page,"使用 DeepSeek 官方预设",()->selectProvider(AiProvider.DEEPSEEK));
         button(page,"使用自定义兼容接口",()->selectProvider(AiProvider.CUSTOM));
         endpoint=field(page,"完整 HTTPS API 地址","例如 https://api.example.com/v1/chat/completions",false);endpoint.setText(settings.endpoint());
         model=field(page,"模型名称","填写服务方提供的模型 ID",false);model.setText(settings.model());
         key=field(page,"API Key",settings.hasKey()?"已安全保存；留空保留，输入可替换":"填写自己的 API Key",true);
-        note(page,"DeepSeek 预设使用 deepseek-flash，关闭思考模式，按 JSON 提取原文要点；模型名称可以修改。自定义服务须兼容 chat/completions 与 JSON 对象输出，不附加 DeepSeek 专用参数。密钥加密保存在本机，不随校园配置导入或分享。",12,ReaderUi.MUTED);
-        note(page,"通知文字最多 12000 字符，含政策片段的发送资料最多 "+AiPolicy.MAX_CONTEXT_CHARS+" 字符，输出上限 "+AiPolicy.MAX_OUTPUT_TOKENS+" tokens；每个账号每天最多 20 次本机尝试（失败或取消也计入）。API 可能收费，实际费用、额度、数据留存和删除由服务方决定；应用不查询余额、不自动重试。",13,ReaderUi.MUTED);
+        TextView quota=note(page,"每日尝试额度："+settings.dailyLimit()+" 次",14,ReaderUi.INK);dailyLimit=new SeekBar(this);dailyLimit.setMax(99);dailyLimit.setProgress(settings.dailyLimit()-1);dailyLimit.setContentDescription("每日AI尝试额度，1至100次");page.addView(dailyLimit,new LinearLayout.LayoutParams(-1,dp(48)));
+        dailyLimit.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar bar,int value,boolean user){quota.setText("每日尝试额度："+(value+1)+" 次");}public void onStartTrackingTouch(SeekBar bar){}public void onStopTrackingTouch(SeekBar bar){}});
+        note(page,"DeepSeek 预设使用 deepseek-flash，关闭思考模式，生成附短句引用的简洁摘要；模型名称可以修改。自定义服务须兼容 chat/completions 与 JSON 对象输出。密钥加密保存在本机。",12,ReaderUi.MUTED);
+        note(page,"通知文字最多 12000 字符，含政策片段的发送资料最多 "+AiPolicy.MAX_CONTEXT_CHARS+" 字符，输出上限 "+AiPolicy.MAX_OUTPUT_TOKENS+" tokens；每日本机尝试额度可设置为1至100次，默认20次，失败或取消也计入。修改额度不会清零今日次数。API 可能收费，实际费用和数据留存由服务方决定。",13,ReaderUi.MUTED);
         status=note(page,"",13,ReaderUi.BLUE);status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        button(page,"保存设置",()->{
-            if(!AiProfile.owns(this,profile)){finish();return;}
-            try{settings.save(enabled.isChecked(),endpoint.getText().toString(),model.getText().toString(),key.getText().toString(),provider);key.setText("");key.setHint(settings.hasKey()?"已安全保存；留空保留，输入可替换":"填写自己的 API Key");status.setText("已保存。今日已尝试 "+settings.usedToday()+" / 20 次；未发送测试请求。");}
-            catch(RuntimeException failure){status.setText(failure.getMessage());}
-        });
-        enabled.setOnCheckedChangeListener((view,on)->{if(!on)try{settings.disable();status.setText("AI 生成已关闭；已缓存摘要仍可查看。开启时请再保存。");}catch(RuntimeException failed){status.setText("关闭未能保存，请重试。");}});
+        note(page,"自动任务最多保留60条，单次优先处理当前页10条；每次后台执行至多请求3篇。只读预览不发请求，结果未知时不会自动重发。API 可能收费，请确认校内资料允许发送给该服务。",12,ReaderUi.MUTED);
+        button(page,"保存设置",this::save);
+        button(page,"保存并开启自动摘要",()->{enabled.setChecked(true);automatic.setChecked(true);save();});
+        enabled.setOnCheckedChangeListener((view,on)->{if(!on)try{settings.disable();AiAutoSummaries.settingsChanged(this,profile);status.setText("AI 生成已关闭；已缓存摘要仍可查看。开启时请再保存。");}catch(RuntimeException failed){status.setText("关闭未能保存，请重试。");}});
         button(page,"关闭并删除 API Key",()->{
             if(!AiProfile.owns(this,profile)){finish();return;}
-            try{settings.deleteKey();enabled.setChecked(false);key.setText("");key.setHint("填写自己的 API Key");status.setText("已关闭 AI 并删除本机 API Key。已缓存摘要可单独清理。");}
+            try{settings.deleteKey();AiAutoSummaries.settingsChanged(this,profile);enabled.setChecked(false);key.setText("");key.setHint("填写自己的 API Key");status.setText("已关闭 AI 并删除本机 API Key。已缓存摘要可单独清理。");}
             catch(RuntimeException failure){status.setText(failure.getMessage());}
         });
-        button(page,"清空当前账号的摘要缓存",()->new AlertDialog.Builder(this).setTitle("清空摘要缓存？").setMessage("仅清理当前站点及账号的摘要，通知正文、已读、稍后读和标签保留。")
+        button(page,"清空当前账号的摘要缓存",()->new AlertDialog.Builder(this).setTitle("清空摘要缓存？").setMessage("清理摘要和任务状态，保留通知及阅读状态。自动摘要开启时，后续浏览会重新生成，可能再次计费。")
                 .setPositiveButton("清空",(d,w)->worker.execute(()->{
-                    try{int count;synchronized(AiSettings.LOCK){if(!AiProfile.owns(this,profile))return;settings.invalidateRequests();try(CampusNoticeStore store=new CampusNoticeStore(this,profile)){count=store.clearSummaries();}}
+                    try{int count;synchronized(AiSettings.LOCK){if(!AiProfile.owns(this,profile))return;settings.invalidateRequests();AiAutoSummaries.cancelAndClear(this,profile);try(CampusNoticeStore store=new CampusNoticeStore(this,profile)){count=Math.max(store.clearSummaries(),AiCoreCache.clear(store));}}
                         runOnUiThread(()->{if(!isDestroyed()&&AiProfile.owns(this,profile))status.setText("已清理 "+count+" 条摘要。");});}
                     catch(RuntimeException failure){runOnUiThread(()->{if(!isDestroyed())status.setText("摘要缓存未能清理，请重试。");});}
                 })).setNegativeButton("取消",null).show());
         note(page,"关闭或删除本机密钥不会撤回已发送的资料。摘要可能遗漏或误解原文；引用校验只证明引文存在，不保证解释正确，请始终核对通知正文。",12,ReaderUi.MUTED);
+    }
+    private void save(){
+        if(!AiProfile.owns(this,profile)){finish();return;}
+        try{settings.save(enabled.isChecked(),endpoint.getText().toString(),model.getText().toString(),key.getText().toString(),provider);settings.setDailyLimit(dailyLimit.getProgress()+1);settings.configureAutomation(enabled.isChecked()&&automatic.isChecked(),automaticPolicies.isChecked());AiAutoSummaries.settingsChanged(this,profile);
+            key.setText("");key.setHint(settings.hasKey()?"已安全保存；留空保留，输入可替换":"填写自己的 API Key");status.setText(settings.automaticEnabled()?"已授权自动摘要，返回通知列表后处理当前页及新增内容。今日已尝试 "+settings.usedToday()+" / "+settings.dailyLimit()+" 次。":"已保存。今日已尝试 "+settings.usedToday()+" / "+settings.dailyLimit()+" 次；未发送测试请求。");
+        }catch(RuntimeException failure){status.setText(failure.getMessage());}
     }
     @Override protected void onResume(){super.onResume();if(profile!=null&&!AiProfile.owns(this,profile))finish();}
     @Override protected void onDestroy(){worker.shutdownNow();super.onDestroy();}

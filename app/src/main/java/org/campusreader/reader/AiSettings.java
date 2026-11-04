@@ -45,6 +45,8 @@ public final class AiSettings {
     }}
     public String endpoint(){return prefs.getString("endpoint","");}
     public String model(){return prefs.getString("model","");}
+    public long revision(){return prefs.getLong("revision",0);}
+    Config cacheConfig(){return new Config(enabled(),endpoint(),model(),"",revision(),provider());}
     public AiProvider provider(){synchronized(LOCK){
         // Versions before provider selection stored only the endpoint. Infer the official adapter
         // without modifying credentials or contacting a server. Explicit CUSTOM always wins.
@@ -53,6 +55,15 @@ public final class AiSettings {
         catch(IllegalArgumentException unsupported){return AiProvider.CUSTOM;}
     }}
     public boolean enabled(){return prefs.getBoolean("enabled",false);}
+    public boolean automaticEnabled(){synchronized(LOCK){return enabled()&&prefs.getBoolean("automatic",false)&&automationBinding().equals(prefs.getString("automatic_binding",""));}}
+    public boolean automaticPolicies(){return automaticEnabled()&&prefs.getBoolean("automatic_policies",false);}
+    private String automationBinding(){return SummaryInput.hash(endpoint()+"\u0000"+provider().id);}
+    /** Explicit authorization for future automatic sends to this exact service; never migrates silently. */
+    public void configureAutomation(boolean automatic,boolean policies){synchronized(LOCK){
+        if(automatic&&!enabled())throw new IllegalArgumentException("请先启用并保存 AI 服务");
+        if(!prefs.edit().putBoolean("automatic",automatic).putBoolean("automatic_policies",automatic&&policies).putString("automatic_binding",automatic?automationBinding():"")
+                .putLong("revision",prefs.getLong("revision",0)+1).commit())throw new IllegalStateException("自动摘要设置未保存");
+    }}
     public boolean hasKey(){return prefs.contains("encrypted_key");}
     public void save(boolean enabled,String endpoint,String model,String newKey){save(enabled,endpoint,model,newKey,provider());}
     public void save(boolean enabled,String endpoint,String model,String newKey,AiProvider provider){synchronized(LOCK){
@@ -79,9 +90,11 @@ public final class AiSettings {
     }}
     public boolean isCurrent(Config config){synchronized(LOCK){return config!=null&&config.enabled&&prefs.getBoolean("enabled",false)&&prefs.getLong("revision",0)==config.revision;}}
     public int usedToday(){synchronized(LOCK){return day().equals(prefs.getString("request_day",""))?prefs.getInt("request_count",0):0;}}
+    public int dailyLimit(){return Math.max(1,Math.min(100,prefs.getInt("daily_limit",AiPolicy.DAILY_LIMIT)));}
+    public void setDailyLimit(int limit){if(limit<1||limit>100)throw new IllegalArgumentException("每日额度须为1至100次");synchronized(LOCK){if(!prefs.edit().putInt("daily_limit",limit).commit())throw new IllegalStateException("每日额度未保存");}}
     /** Reserve immediately before one confirmed attempt. Failures/cancellation do not refund attempts. */
     public boolean reserve(Config config){synchronized(LOCK){
-        if(!isCurrent(config))return false;String today=day();int used=today.equals(prefs.getString("request_day",""))?prefs.getInt("request_count",0):0;if(used>=AiPolicy.DAILY_LIMIT)return false;
+        if(!isCurrent(config))return false;String today=day();int used=today.equals(prefs.getString("request_day",""))?prefs.getInt("request_count",0):0;if(used>=dailyLimit())return false;
         return prefs.edit().putString("request_day",today).putInt("request_count",used+1).commit();
     }}
     private static String day(){return new SimpleDateFormat("yyyy-MM-dd",Locale.ROOT).format(new Date());}

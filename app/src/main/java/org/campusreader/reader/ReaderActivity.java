@@ -36,6 +36,17 @@ public class ReaderActivity extends Activity {
     private ReaderFilterState libraryFilter;
     private KeywordRules keywordRules;
     private boolean priorityOnly;
+    private boolean recommended=true;
+    private String selectedTopic="";
+    private final Map<NoticeKey,String> summarySnippets=new HashMap<>();
+    private final Map<NoticeKey,String> recommendationReasons=new HashMap<>();
+    private final Map<NoticeKey,String> topicLabels=new HashMap<>();
+    private LinearLayout quickTags;
+    private Dialog previewDialog;
+    private boolean preferencesPrompted;
+    private boolean summaryReceiverRegistered;
+    private NoticeKey pendingOpenKey;
+    private final BroadcastReceiver summaryUpdates=new BroadcastReceiver(){@Override public void onReceive(Context c,Intent i){if(resumed&&!detailVisible)loadCache();}};
     private TextView priorityCount;
     private String profile,source=CampusPortalParser.SOURCE,sourceTitle="校内通知";
     private volatile int generation=0;
@@ -52,9 +63,9 @@ public class ReaderActivity extends Activity {
     private long pausedAt;
     private final Runnable readiness=new Runnable(){@Override public void run(){
         if(!resumed)return;
-        boolean ready=CampusApplication.auth().isAccessReady();
+        boolean ready=PortalAccess.isReady(ReaderActivity.this);
         if(ready&&!lastAccessReady){applyAccount();if(!detailVisible)loadCache();}
-        if(!ready&&lastAccessReady){portalVerified=false;message("校园通道已断开，请重新完成校园连接。缓存仍可阅读。");}
+        if(!ready&&lastAccessReady){portalVerified=false;message("当前网络暂时无法访问门户，缓存仍可阅读。");}
         lastAccessReady=ready;updateConnectionStatus();if(ready)drainPortalRefresh();mainHandler.postDelayed(this,1000);
     }};
     private CampusPortalParser.MoreRequest nextPage;
@@ -85,22 +96,26 @@ public class ReaderActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        if(PortalAccess.account(this).isEmpty()){startActivity(new Intent(this,LoginActivity.class));finish();return;}
         getWindow().setStatusBarColor(ReaderUi.SURFACE);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         preferences=getSharedPreferences("reader-local",MODE_PRIVATE);
         viewMode=preferences.getString("reader-view-mode",preferences.getBoolean("reader-card-style",true)?"magazine":"list");
         cardStyle="card".equals(viewMode);
-        profile=preferences.getString(ReaderPreferences.lastProfileKey(),"local");
+        profile=PortalAccess.currentProfile(this);
+        if(profile.isEmpty())profile=preferences.getString(ReaderPreferences.lastProfileKey(),"local");
+        recommended=preferences.getBoolean("recommended:"+profile,true);
         libraryFilter=ReaderFilterState.load(preferences,profile);
         keywordRules=KeywordRules.load(this,profile);
         ReaderNotifications.initialize(this);RefreshScheduler.schedule(this);
         loadSubscriptions();
         acceptNotification(getIntent());
         showList();
-        if(state==null&&!CampusSite.isConfigured())mainHandler.post(()->{if(!isFinishing())openCampusConfiguration();});
+        openPendingNotice();
     }
     @Override protected void onResume() {
         super.onResume();
+        if(isFinishing()||preferences==null)return;
         if(CampusConfiguration.requiresRestart()){
             new AlertDialog.Builder(this).setTitle("配置已保存")
                 .setMessage("请关闭并重新打开应用，使新的校园配置生效。")
@@ -109,23 +124,26 @@ public class ReaderActivity extends Activity {
         }
         if(pausedAt>0&&android.os.SystemClock.elapsedRealtime()-pausedAt>=60_000L){attemptedAutoRefresh=false;portalPrompted=false;}
         resumed=true;mainHandler.removeCallbacks(readiness);mainHandler.post(readiness);
+        if(!summaryReceiverRegistered){IntentFilter changes=new IntentFilter(AiAutoSummaries.ACTION_UPDATED);if(android.os.Build.VERSION.SDK_INT>=33)registerReceiver(summaryUpdates,changes,Context.RECEIVER_NOT_EXPORTED);else registerReceiver(summaryUpdates,changes);summaryReceiverRegistered=true;}
+        AiAutoSummaries.kick(this);
         applyAccount();
+        if(!preferencesPrompted&&profile.startsWith("campus:")&&!PreferenceProfile.isOnboardingDone(this,profile)){preferencesPrompted=true;startActivity(new Intent(this,InterestsActivity.class).putExtra(InterestsActivity.EXTRA_PROFILE,profile));return;}
         KeywordRules updated=KeywordRules.load(this,profile);boolean changed=!updated.fingerprint().equals(keywordRules.fingerprint());keywordRules=updated;
         if(changed){generation++;savedListPosition=0;savedListTop=0;if(!detailVisible){showList();return;}}
         if(!detailVisible)loadCache();
     }
-    @Override protected void onPause(){foregroundRequestGeneration++;pausedAt=android.os.SystemClock.elapsedRealtime();resumed=false;mainHandler.removeCallbacks(readiness);super.onPause();}
+    @Override protected void onPause(){foregroundRequestGeneration++;pausedAt=android.os.SystemClock.elapsedRealtime();resumed=false;mainHandler.removeCallbacks(readiness);if(summaryReceiverRegistered){unregisterReceiver(summaryUpdates);summaryReceiverRegistered=false;}closePreview();super.onPause();}
     private void applyAccount() {
-        String account=CampusApplication.auth().getProfileId();
-        if(CampusApplication.auth().isAccessReady()&&account!=null&&!account.trim().isEmpty()) {
-            String current=MediaSafety.readerProfile(account);
+        String account=PortalAccess.account(this);
+        if(account!=null&&!account.trim().isEmpty()) {
+            String current=PortalAccess.currentProfile(this);
             if(!current.equals(profile)) {
-                new ReaderPreferences(this).clearPortalSession();
+                closePreview();summarySnippets.clear();recommendationReasons.clear();selectedTopic="";preferencesPrompted=false;
                 profile=current;keywordRules=KeywordRules.load(this,profile);priorityOnly=false;source=CampusPortalParser.SOURCE;sourceTitle="校内通知";filter=0;visibleLimit=100; preferences.edit().putString(ReaderPreferences.lastProfileKey(),profile).apply();
                 libraryFilter=ReaderFilterState.load(preferences,profile);
                 generation++;refreshSequence++;busy=false;refreshingProfile="";refreshingSource="";refreshMessage=""; nextPage=null; rows.clear(); detailVisible=false;attemptedAutoRefresh=false;portalVerified=false;portalPrompted=false;clearingSession=true;showList();
-                // WebView has one app-wide cookie store: never reuse account A's portal SSO for account B.
-                CookieManager.getInstance().removeAllCookies(removed->{clearingSession=false;CookieManager.getInstance().flush();updateConnectionStatus();if(!isDestroyed()){boolean started=drainPortalRefresh();if(!started&&!deferredPortalRefresh.hasRequest()&&!busy&&CampusPortalParser.SOURCE.equals(source))refresh(false);}});
+                // Account selection clears the previous session before login. Do not erase the newly verified cookies here.
+                clearingSession=false;updateConnectionStatus();
             }
         }
     }
@@ -152,14 +170,14 @@ public class ReaderActivity extends Activity {
             return;
         }
         if(request==AUTH&&result==RESULT_OK) {
-            String account=CampusApplication.auth().getProfileId();
+            String account=PortalAccess.account(this);
             if(account!=null&&!account.trim().isEmpty()) {
                 source=CampusPortalParser.SOURCE;sourceTitle="校内通知";priorityOnly=false;filter=0;applyAccount();
                 showList();if(!clearingSession)refresh(false);
             }
         }
     }
-    private void connect(){if(!CampusConfiguration.isConfigured()){openCampusConfiguration();return;}startActivityForResult(new Intent(this,CampusAuthActivity.class),AUTH);}
+    private void connect(){startActivity(new Intent(this,LoginActivity.class));}
     private void openCampusConfiguration(){
         if(configurationLease!=null)return;
         if(busy||clearingSession){message("请等待当前刷新或登录处理完成后再配置。");return;}
@@ -172,10 +190,11 @@ public class ReaderActivity extends Activity {
         RefreshScheduler.cancel(this);ReaderNotifications.clearAll(this);finishAffinity();
         mainHandler.postDelayed(()->android.os.Process.killProcess(android.os.Process.myPid()),150);
     }
-    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);acceptNotification(intent);showList();}
-    private void acceptNotification(Intent intent){if(intent!=null&&intent.getBooleanExtra(ReaderNotifications.EXTRA_UNREAD,false)&&profile.equals(intent.getStringExtra(ReaderNotifications.EXTRA_PROFILE))){source=CampusPortalParser.SOURCE;priorityOnly=intent.getBooleanExtra(ReaderNotifications.EXTRA_PRIORITY,false);sourceTitle=priorityOnly?"重点关注":"校内通知";filter=1;libraryFilter=new ReaderFilterState();libraryFilter.save(preferences,profile);}}
+    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);acceptNotification(intent);showList();openPendingNotice();}
+    private void acceptNotification(Intent intent){if(intent!=null&&profile.equals(intent.getStringExtra(ReaderNotifications.EXTRA_PROFILE))){if(intent.hasExtra(NoticeReminders.EXTRA_SOURCE)&&intent.hasExtra(NoticeReminders.EXTRA_ID))try{pendingOpenKey=CampusNoticeStore.summaryKey(intent.getStringExtra(NoticeReminders.EXTRA_SOURCE),intent.getStringExtra(NoticeReminders.EXTRA_ID));}catch(RuntimeException ignored){}if(intent.getBooleanExtra(ReaderNotifications.EXTRA_UNREAD,false)){source=CampusPortalParser.SOURCE;priorityOnly=intent.getBooleanExtra(ReaderNotifications.EXTRA_PRIORITY,false);sourceTitle=priorityOnly?"重点关注":"校内通知";filter=1;libraryFilter=new ReaderFilterState();libraryFilter.save(preferences,profile);}}}
+    private void openPendingNotice(){if(pendingOpenKey!=null){NoticeKey key=pendingOpenKey;pendingOpenKey=null;openNotice(key);}}
     private void rememberListPosition(){if(list!=null&&!detailVisible){savedListScope=listScope;savedListPosition=list.getFirstVisiblePosition();View first=list.getChildAt(0);savedListTop=first==null?0:first.getTop();}}
-    private String scope(){return profile+"|"+source+"|"+priorityOnly+"|"+keywordRules.fingerprint()+"|"+filter+"|"+libraryFilter.search+"|"+libraryFilter.include+"|"+libraryFilter.exclude+"|"+libraryFilter.tags;}
+    private String scope(){return profile+"|"+source+"|"+priorityOnly+"|"+recommended+"|"+selectedTopic+"|"+keywordRules.fingerprint()+"|"+filter+"|"+libraryFilter.search+"|"+libraryFilter.include+"|"+libraryFilter.exclude+"|"+libraryFilter.tags;}
     protected void showList() {
         rememberListPosition();detailVisible=false;
         if(detailWeb!=null){detailWeb.destroy();detailWeb=null;}
@@ -183,7 +202,7 @@ public class ReaderActivity extends Activity {
         setContentView(R.layout.reader_activity_reader);
         nativeDrawer=findViewById(R.id.reader_drawer_layout);
         toolbar=findViewById(R.id.reader_toolbar);
-        toolbar.setTitle(priorityOnly?"重点关注":filter==2?"稍后读":sourceTitle);toolbar.setTitleTextColor(INK);
+        toolbar.setTitle(CampusPortalParser.SOURCE.equals(source)?"北邮人信息":sourceTitle);toolbar.setTitleTextColor(INK);
         toolbar.setNavigationIcon(ReaderUi.icon(this,"menu",INK));toolbar.setNavigationContentDescription("打开导航");toolbar.setNavigationOnClickListener(v->showSources());
         toolbar.getMenu().clear();
         toolbar.getMenu().add(0,1,0,"阅读选项").setIcon(ReaderUi.icon(this,"eye",INK)).setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
@@ -191,6 +210,11 @@ public class ReaderActivity extends Activity {
         toolbar.getMenu().add(0,3,2,"标为已读").setIcon(ReaderUi.icon(this,"check",INK)).setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
         toolbar.setOnMenuItemClickListener(item->{if(item.getItemId()==1)showReadingMenu(toolbar);else if(item.getItemId()==2)toggleSearch();else markDisplayedRead();return true;});
         FrameLayout frame=findViewById(R.id.reader_main_content);LinearLayout root=column();root.setBackgroundColor(ReaderUi.SURFACE);frame.addView(root,new FrameLayout.LayoutParams(-1,-1));
+        if(CampusPortalParser.SOURCE.equals(source)){
+            String mode=filter==2?"稍后读":filter==1?"未读":recommended?"为你推荐":"最新";
+            root.addView(ReaderDiscoveryBar.create(this,Arrays.asList("为你推荐","最新","未读","稍后读"),mode,choice->{recommended=choice.equals("为你推荐");filter=choice.equals("稍后读")?2:choice.equals("未读")?1:0;priorityOnly=false;preferences.edit().putBoolean("recommended:"+profile,recommended).apply();generation++;showList();}));
+            quickTags=column();root.addView(quickTags);renderQuickTags(Collections.emptyList());
+        }else quickTags=null;
         LinearLayout searchRow=row();searchRow.setPadding(dp(16),0,dp(8),0);searchRow.setBackgroundColor(ReaderUi.SURFACE);
         searchInput=new EditText(this);searchInput.setSingleLine(true);searchInput.setTextSize(16);searchInput.setHint("搜索标题及缓存正文");searchInput.setTextColor(INK);searchInput.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);searchInput.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(256)});searchInput.setText(libraryFilter.search);searchRow.addView(searchInput,new LinearLayout.LayoutParams(0,dp(48),1));
         searchRow.addView(icon("close","清空并收起搜索",v->{searchInput.setText("");searchRow.setVisibility(View.GONE);hideKeyboard();}),new LinearLayout.LayoutParams(dp(48),dp(48)));searchRow.setVisibility(libraryFilter.search.isEmpty()?View.GONE:View.VISIBLE);root.addView(searchRow);
@@ -203,7 +227,7 @@ public class ReaderActivity extends Activity {
         emptyMore=button("加载更多",v->loadMoreNotices());empty.addView(emptyMore,new LinearLayout.LayoutParams(-2,dp(48)));
         FrameLayout content=new FrameLayout(this);content.addView(list,new FrameLayout.LayoutParams(-1,-1));content.addView(empty,new FrameLayout.LayoutParams(-1,-1));list.setEmptyView(empty);
         swipeRefresh=new SwipeRefreshLayout(this);swipeRefresh.setColorSchemeColors(BLUE);swipeRefresh.addView(content);swipeRefresh.setOnChildScrollUpCallback((parent,child)->list.canScrollVertically(-1));swipeRefresh.setOnRefreshListener(()->{if(!busy){refresh(false);updateBusy();}else swipeRefresh.setRefreshing(true);});root.addView(swipeRefresh,new LinearLayout.LayoutParams(-1,0,1));
-        list.setOnItemClickListener((p,v,pos,id)->{if(pos<rows.size()){rememberListPosition();openNotice(rows.get(pos).content.key);}});list.setOnItemLongClickListener((p,v,pos,id)->{if(pos>=rows.size())return false;rowActions(rows.get(pos));return true;});
+        list.setOnItemClickListener((p,v,pos,id)->{if(pos<rows.size()){rememberListPosition();openNotice(rows.get(pos).content.key);}});list.setOnItemLongClickListener((p,v,pos,id)->{if(pos>=rows.size())return false;showPreview(rows.get(pos));return true;});
         View drawerHost=findViewById(R.id.reader_drawer_content);if(drawerHost instanceof ScrollView)drawerScroll=(ScrollView)drawerHost;else{drawerScroll=new ScrollView(this);((android.view.ViewGroup)drawerHost).addView(drawerScroll);}
         drawerPanel=column();drawerPanel.setBackgroundColor(ReaderUi.SURFACE);drawerScroll.addView(drawerPanel);populateDrawer();
         nativeDrawer.addDrawerListener(new DrawerLayout.SimpleDrawerListener(){@Override public void onDrawerOpened(View view){hideKeyboard();populateDrawer();}@Override public void onDrawerSlide(View view,float offset){if(offset>0)hideKeyboard();}});
@@ -215,7 +239,7 @@ public class ReaderActivity extends Activity {
     private void toggleSearch(){if(searchInput==null)return;View parent=(View)searchInput.getParent();if(parent.getVisibility()==View.VISIBLE){parent.setVisibility(View.GONE);hideKeyboard();}else{parent.setVisibility(View.VISIBLE);searchInput.requestFocus();((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).showSoftInput(searchInput,android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);}}
     private void setCardStyle(boolean value){setViewMode(value?"card":"list");}
     private void setViewMode(String value){viewMode=value;cardStyle="card".equals(value);preferences.edit().putString("reader-view-mode",value).putBoolean("reader-card-style",cardStyle).apply();showList();}
-    private void clearFilters(){libraryFilter=new ReaderFilterState();libraryFilter.save(preferences,profile);generation++;showList();}
+    private void clearFilters(){selectedTopic="";libraryFilter=new ReaderFilterState();libraryFilter.save(preferences,profile);generation++;showList();}
     private void updateEmptyState(){
         if(emptyTitle==null)return;boolean filtered=libraryFilter.active()||filter!=0;
         if(keywordRules.loadFailed){emptyTitle.setText("关键词规则暂时无法读取");emptyHint.setText("列表已暂停显示，缓存和阅读状态仍保留。可在关键词规则中重试读取或恢复上一版。");emptyAction.setText("检查关键词规则");emptyAction.setEnabled(true);emptyAction.setAlpha(1f);emptyAction.setOnClickListener(v->openKeywordRules());emptyMore.setVisibility(View.GONE);return;}
@@ -232,7 +256,7 @@ public class ReaderActivity extends Activity {
         emptyAction.setOnClickListener(v->{if(priorityOnly||keywordRules.hasBlocked())openKeywordRules();else if(filtered){filter=0;clearFilters();}else refresh(false);});
     }
     private void openKeywordRules(){startActivity(new Intent(this,KeywordRulesActivity.class).putExtra("profile",profile));}
-    private void showPriority(){priorityOnly=true;source=CampusPortalParser.SOURCE;sourceTitle="重点关注";filter=0;libraryFilter=new ReaderFilterState();libraryFilter.save(preferences,profile);visibleLimit=100;nextPage=null;generation++;showList();}
+    private void showPriority(){selectedTopic="";recommended=false;priorityOnly=true;source=CampusPortalParser.SOURCE;sourceTitle="重点关注";filter=0;libraryFilter=new ReaderFilterState();libraryFilter.save(preferences,profile);visibleLimit=100;nextPage=null;generation++;showList();}
     private void showReadingMenu(View anchor){
         View options=getLayoutInflater().inflate(R.layout.reader_art_options,null);
         PopupWindow popup=new PopupWindow(options,Math.min(dp(308),getResources().getDisplayMetrics().widthPixels-dp(24)),-2,true);popup.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(ReaderUi.SURFACE));popup.setElevation(dp(8));popup.setOutsideTouchable(true);
@@ -258,21 +282,22 @@ public class ReaderActivity extends Activity {
     private void updateConnectionStatus(){
         if(connectionStatus==null)return;
         boolean checking=busy&&profile.equals(refreshingProfile)&&CampusPortalParser.SOURCE.equals(refreshingSource);
-        CampusConnectionStatus.PortalState portal=checking?CampusConnectionStatus.PortalState.CHECKING:
-                deferredPortalRefresh.hasRequest()||clearingSession?CampusConnectionStatus.PortalState.WAITING:
-                portalVerified?CampusConnectionStatus.PortalState.VERIFIED:CampusConnectionStatus.PortalState.UNKNOWN;
-        CampusConnectionStatus view=CampusApplication.auth().connectionStatus(portal);
-        connectionStatus.setText(view.title);
+        boolean ready=PortalAccess.isReady(this);
+        connectionStatus.setText(PortalAccess.routeLabel(this)+" · "+(checking?"正在同步":portalVerified?"门户已验证":"门户待检查"));
         if(connectionHint!=null){long last=new ReaderPreferences(this).getLastSuccessfulMillis(profile);
-            connectionHint.setText(view.detail+(last>0?"\n上次完整同步："+android.text.format.DateFormat.format("MM-dd HH:mm",last):"\n尚未完成一次同步"));}
-        if(portalButton!=null){boolean enabled=!busy&&!clearingSession&&view.action!=CampusConnectionStatus.Action.WAIT;
-            portalButton.setEnabled(enabled);portalButton.setAlpha(enabled?1f:.38f);portalButton.setText(view.actionLabel);
-            portalButton.setOnClickListener(v->{closeDrawer();switch(view.action){
-                case CONFIGURE:openCampusConfiguration();break;case RESTART:closeForConfiguration();break;
-                case CONNECT:connect();break;case CHECK_PORTAL:case REFRESH:checkCampusPortal();break;
-                case LOGIN_PORTAL:portalLogin();break;default:break;
-            }});
+            connectionHint.setText("校内优先直连，校外按需连接 VPN"+(last>0?"\n上次完整同步："+android.text.format.DateFormat.format("MM-dd HH:mm",last):"\n尚未完成一次同步"));}
+        if(portalButton!=null){boolean enabled=!busy&&!clearingSession;
+            portalButton.setEnabled(enabled);portalButton.setAlpha(enabled?1f:.38f);portalButton.setText(ready?"检查并刷新门户":"登录 / 恢复连接");
+            portalButton.setOnClickListener(v->{closeDrawer();if(ready)checkCampusPortal();else connect();});
         }
+    }
+
+    private void renderQuickTags(List<NoticeTag> tags){
+        if(quickTags==null)return;quickTags.removeAllViews();List<String> labels=new ArrayList<>();labels.add("全部标签");labels.addAll(RecommendationEngine.TOPICS);labels.add("更多标签");
+        quickTags.addView(ReaderDiscoveryBar.create(this,labels,selectedTopic.isEmpty()?(libraryFilter.tags.isEmpty()?"全部标签":"更多标签"):selectedTopic,choice->{
+            if(choice.equals("更多标签")){showFilterDialog();return;}
+            selectedTopic=choice.equals("全部标签")?"":choice;libraryFilter.tags.clear();libraryFilter.save(preferences,profile);generation++;showList();
+        }));
     }
 
     private void message(String value){lastMessage=value;renderStatus();if(resumed&&!detailVisible&&nativeDrawer!=null&&!nativeDrawer.isDrawerOpen(androidx.core.view.GravityCompat.START))Toast.makeText(this,value,Toast.LENGTH_SHORT).show();}
@@ -287,11 +312,11 @@ public class ReaderActivity extends Activity {
     private TextView drawerItem(LinearLayout panel,String image,String value,boolean selected,Runnable action){
         View item=getLayoutInflater().inflate(R.layout.reader_item_list_group,panel,false);ImageView symbol=item.findViewById(R.id.reader_image);symbol.setImageDrawable(ReaderUi.icon(this,image,selected?BLUE:MUTED));TextView label=item.findViewById(R.id.reader_text);label.setText(value);label.setTextColor(selected?BLUE:INK);TextView count=item.findViewById(R.id.reader_textCount);count.setText("");item.findViewById(R.id.reader_ll_selected).setBackgroundColor(BLUE);item.findViewById(R.id.reader_ll_selected).setVisibility(selected?View.VISIBLE:View.INVISIBLE);ReaderUi.selectable(item,selected?ReaderUi.TINT:ReaderUi.SURFACE);item.setContentDescription(value);item.setOnClickListener(v->{closeDrawer();action.run();});panel.addView(item);return count;
     }
-    private void selectSource(String key,String title,int selectedFilter){priorityOnly=false;source=key;sourceTitle=title;filter=selectedFilter;visibleLimit=100;nextPage=null;libraryFilter=new ReaderFilterState();libraryFilter.save(preferences,profile);generation++;showList();}
+    private void selectSource(String key,String title,int selectedFilter){selectedTopic="";recommended=false;priorityOnly=false;source=key;sourceTitle=title;filter=selectedFilter;visibleLimit=100;nextPage=null;libraryFilter=new ReaderFilterState();libraryFilter.save(preferences,profile);generation++;showList();}
     private void showSources(){if(nativeDrawer!=null&&!detailVisible){hideKeyboard();if(nativeDrawer.isDrawerOpen(androidx.core.view.GravityCompat.START))closeDrawer();else nativeDrawer.openDrawer(androidx.core.view.GravityCompat.START);}}
     private void populateDrawer(){
         if(drawerPanel==null||detailVisible)return;final int drawerRequest=++drawerSequence;drawerPanel.removeAllViews();
-        View header=getLayoutInflater().inflate(R.layout.reader_list_header,drawerPanel,false);((TextView)header.findViewById(R.id.reader_user_name)).setText("校园阅读");((TextView)header.findViewById(R.id.reader_user_email)).setText("本地阅读");((ImageView)header.findViewById(R.id.reader_user_image)).setImageDrawable(ReaderUi.icon(this,"book",BLUE));header.findViewById(R.id.reader_image_drop).setVisibility(View.GONE);drawerPanel.addView(header);
+        View header=getLayoutInflater().inflate(R.layout.reader_list_header,drawerPanel,false);((TextView)header.findViewById(R.id.reader_user_name)).setText("北邮人信息");((TextView)header.findViewById(R.id.reader_user_email)).setText("与你有关的校园信息");((ImageView)header.findViewById(R.id.reader_user_image)).setImageDrawable(ReaderUi.icon(this,"book",BLUE));header.findViewById(R.id.reader_image_drop).setVisibility(View.GONE);drawerPanel.addView(header);
         allCount=drawerItem(drawerPanel,"book","全部校内通知",CampusPortalParser.SOURCE.equals(source)&&filter==0&&!priorityOnly&&libraryFilter.tags.isEmpty()&&sourceTitle.equals("全部校内通知"),()->selectSource(CampusPortalParser.SOURCE,"全部校内通知",0));
         laterCount=drawerItem(drawerPanel,"star","稍后读",filter==2&&!priorityOnly,()->selectSource(CampusPortalParser.SOURCE,"稍后读",2));
         priorityCount=drawerItem(drawerPanel,"eye","重点关注",priorityOnly,()->showPriority());
@@ -303,28 +328,42 @@ public class ReaderActivity extends Activity {
         drawerSection(drawerPanel,"标签");LinearLayout tagsPanel=column();drawerPanel.addView(tagsPanel);drawerItem(drawerPanel,"tag","管理标签",false,()->manageTags());
         drawerSection(drawerPanel,"校园访问");connectionStatus=text("",12,MUTED);connectionStatus.setPadding(dp(16),0,dp(16),dp(8));drawerPanel.addView(connectionStatus);
         connectionHint=text("",12,MUTED);connectionHint.setPadding(dp(16),0,dp(16),dp(8));drawerPanel.addView(connectionHint);
-        drawerItem(drawerPanel,"settings","学校与校园配置",false,()->openCampusConfiguration());
-        drawerItem(drawerPanel,"link","校园认证",false,()->connect());
+        drawerItem(drawerPanel,"settings","关注偏好",false,()->startActivity(new Intent(this,InterestsActivity.class).putExtra(InterestsActivity.EXTRA_PROFILE,profile)));
+        drawerItem(drawerPanel,"eye","体验反馈",false,()->startActivity(new Intent(this,SurveyActivity.class).putExtra(SurveyActivity.EXTRA_PROFILE,profile)));
+        drawerItem(drawerPanel,"link","账号与校园连接",false,()->startActivity(new Intent(this,LoginActivity.class).putExtra(LoginActivity.EXTRA_MANAGE,true)));
         portalButton=button("检查 / 登录信息门户",v->{closeDrawer();portalLogin();});portalButton.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);portalButton.setPadding(dp(56),0,dp(16),0);drawerPanel.addView(portalButton,new LinearLayout.LayoutParams(-1,dp(48)));
         drawerItem(drawerPanel,"refresh","刷新通知",false,()->refresh(false));
         status=text(statusText(),12,MUTED);status.setPadding(dp(16),dp(4),dp(16),dp(12));drawerPanel.addView(status);
         View separator=new View(this);separator.setBackgroundColor(ReaderUi.LINE);drawerPanel.addView(separator,new LinearLayout.LayoutParams(-1,dp(1)));drawerItem(drawerPanel,"download","下载文件",false,()->MediaActions.viewDownloads(this));View settingsRow=getLayoutInflater().inflate(R.layout.reader_list_footer,drawerPanel,false);((TextView)settingsRow.findViewById(R.id.reader_text_settings)).setText("设置");settingsRow.findViewById(R.id.reader_ll_settings).setOnClickListener(v->{closeDrawer();openSettings();});drawerPanel.addView(settingsRow);
-        final int token=generation;final String p=profile;final LinearLayout current=drawerPanel;final KeywordRules rules=keywordRules;worker.execute(()->{try(CampusNoticeStore store=new CampusNoticeStore(this,p)){List<NoticeTag> tags=store.listTags();long unread=store.count(rules.apply(NoticeQuery.builder(CampusPortalParser.SOURCE).unreadOnly(true),false).build()),saved=store.count(rules.apply(NoticeQuery.builder(CampusPortalParser.SOURCE).laterOnly(true),false).build()),focused=store.count(rules.apply(NoticeQuery.builder(CampusPortalParser.SOURCE).unreadOnly(true),true).build());ui(token,()->{if(drawerPanel!=current||detailVisible||drawerRequest!=drawerSequence)return;allCount.setText(unread==0?"":Long.toString(unread));laterCount.setText(saved==0?"":Long.toString(saved));priorityCount.setText(focused==0?"":Long.toString(focused));for(NoticeTag tag:tags)drawerItem(tagsPanel,"tag",tag.name,libraryFilter.tags.contains(tag.id),()->{libraryFilter=new ReaderFilterState();libraryFilter.tags.add(tag.id);libraryFilter.save(preferences,profile);source=CampusPortalParser.SOURCE;sourceTitle=tag.name;priorityOnly=false;filter=0;generation++;showList();});});}catch(Exception ignored){}});
+        final int token=generation;final String p=profile;final LinearLayout current=drawerPanel;final KeywordRules rules=keywordRules;worker.execute(()->{try(CampusNoticeStore store=new CampusNoticeStore(this,p)){List<NoticeTag> tags=store.listTags();long unread=store.count(rules.apply(NoticeQuery.builder(CampusPortalParser.SOURCE).unreadOnly(true),false).build()),saved=store.count(rules.apply(NoticeQuery.builder(CampusPortalParser.SOURCE).laterOnly(true),false).build()),focused=focusedCount(store,rules,p);ui(token,()->{if(drawerPanel!=current||detailVisible||drawerRequest!=drawerSequence)return;allCount.setText(unread==0?"":Long.toString(unread));laterCount.setText(saved==0?"":Long.toString(saved));priorityCount.setText(focused==0?"":Long.toString(focused));for(NoticeTag tag:tags)drawerItem(tagsPanel,"tag",tag.name,libraryFilter.tags.contains(tag.id),()->{libraryFilter=new ReaderFilterState();libraryFilter.tags.add(tag.id);libraryFilter.save(preferences,profile);source=CampusPortalParser.SOURCE;sourceTitle=tag.name;priorityOnly=false;filter=0;generation++;showList();});});}catch(Exception ignored){}});
         updateConnectionStatus();
+    }
+
+    private long focusedCount(CampusNoticeStore store,KeywordRules rules,String owner){
+        long count=0;for(CachedNotice notice:store.query(rules.apply(NoticeQuery.builder(CampusPortalParser.SOURCE).unreadOnly(true).page(1000,0),false).build()))if(!RecommendationEngine.priorityReason(this,owner,notice,rules).isEmpty())count++;return count;
     }
 
     private void subscriptionMenu(){List<String> names=new ArrayList<>();for(Subscription s:subscriptions)names.add(s.title);names.add("添加 RSS / Atom 订阅");names.add("管理本地订阅");new AlertDialog.Builder(this).setTitle("其他订阅").setItems(names.toArray(new String[0]),(d,index)->{if(index<subscriptions.size()){Subscription s=subscriptions.get(index);selectSource(RssParser.source(s.url),s.title,0);}else if(index==subscriptions.size())addSubscription();else manageSubscriptions();}).setNegativeButton("返回",null).show();}
     private void loadCache() {
-        final String p=profile,s=source,queryScope=scope();final int token=generation;final NoticeQuery query=libraryFilter.query(s,filter,Math.min(visibleLimit,1000),keywordRules,priorityOnly);
+        final String p=profile,s=source,queryScope=scope(),topic=selectedTopic;final int token=generation;final boolean rank=recommended&&!priorityOnly&&filter==0&&CampusPortalParser.SOURCE.equals(s);
+        final KeywordRules rules=keywordRules;final boolean focused=priorityOnly;final NoticeQuery query=libraryFilter.query(s,filter,1000,rules,false);
         worker.execute(()->{try(CampusNoticeStore store=new CampusNoticeStore(this,p)) {
-            store.enforceRetention();List<CachedNotice> found=store.query(query);long total=store.count(query);
+            store.enforceRetention();List<CachedNotice> candidates=store.query(query);
+            if(focused)candidates.removeIf(item->RecommendationEngine.priorityReason(this,p,item,rules).isEmpty());
+            if(!topic.isEmpty())candidates.removeIf(item->!RecommendationEngine.matchesTopic(item,topic));
+            if(rank)candidates=RecommendationEngine.sort(this,p,candidates);
+            final long total=topic.isEmpty()&&!focused?store.count(query):candidates.size();
+            final List<CachedNotice> found=new ArrayList<>(candidates.subList(0,Math.min(visibleLimit,candidates.size())));
+            final Map<NoticeKey,String> summaries=new HashMap<>(),reasons=new HashMap<>(),topics=new HashMap<>();List<NoticeKey> pendingAi=new ArrayList<>();
+            for(CachedNotice item:found){AiSummaryPresentation.Cached cached=AiSummaryPresentation.loadCached(this,p,item.content.key);if(cached!=null&&!cached.snippet.isEmpty())summaries.put(item.content.key,cached.snippet);topics.put(item.content.key,String.join(" · ",RecommendationEngine.topics(item)));if(rank)reasons.put(item.content.key,RecommendationEngine.reason(this,p,item));if(pendingAi.size()<10&&item.bodyCached)pendingAi.add(item.content.key);}
+            final List<NoticeTag> availableTags=store.listTags();AiAutoSummaries.enqueueVisible(this,p,pendingAi);
             CampusNoticeStore.ConnectionState connection=store.connectionState(s);
-            ui(token,()->{if(detailVisible)return;rows.clear();rows.addAll(found);adapter.notifyDataSetChanged();
+            ui(token,()->{if(detailVisible||!queryScope.equals(scope()))return;rows.clear();rows.addAll(found);summarySnippets.clear();summarySnippets.putAll(summaries);recommendationReasons.clear();recommendationReasons.putAll(reasons);topicLabels.clear();topicLabels.putAll(topics);adapter.notifyDataSetChanged();renderQuickTags(availableTags);
                 updateEmptyState();
                 if(connection==CampusNoticeStore.ConnectionState.REAUTH_REQUIRED&&!busy)message(deferredPortalRefresh.hasRequest()?"门户登录已返回，等待校园通道恢复后验证；缓存仍可阅读。":"信息门户需要单独登录，请点击“登录信息门户”。已缓存内容和阅读状态仍保留。");
-                matchingCount=total;heading.setText("已显示 "+found.size()+" / "+total+" 篇"+(libraryFilter.active()?" · 已筛选":"")+(keywordRules.hasBlocked()?" · 已应用屏蔽词":""));more.setVisibility(total>found.size()||CampusPortalParser.SOURCE.equals(s)?View.VISIBLE:View.GONE);
+                matchingCount=total;heading.setText("已显示 "+found.size()+" / "+total+" 篇"+(rank?" · 按关注推荐":"")+(!topic.isEmpty()?" · "+topic:"")+(libraryFilter.active()?" · 已筛选":"")+(keywordRules.hasBlocked()?" · 已应用屏蔽词":""));more.setVisibility(total>found.size()||CampusPortalParser.SOURCE.equals(s)?View.VISIBLE:View.GONE);
                 if(restoreListPending){restoreListPending=false;if(queryScope.equals(savedListScope))list.setSelectionFromTop(savedListPosition,savedListTop);else list.setSelection(0);}else if(!queryScope.equals(listScope))list.setSelection(0);listScope=queryScope;
-                if(resumed&&new ReaderPreferences(this).isRefreshOnOpen()&&CampusPortalParser.SOURCE.equals(s)&&CampusApplication.auth().isAccessReady()&&!busy&&!clearingSession&&!portalLoginInFlight&&!attemptedAutoRefresh){attemptedAutoRefresh=true;refresh(false);}
+                if(resumed&&new ReaderPreferences(this).isRefreshOnOpen()&&CampusPortalParser.SOURCE.equals(s)&&!busy&&!clearingSession&&!portalLoginInFlight&&!attemptedAutoRefresh){attemptedAutoRefresh=true;refresh(false);}
             });
         }catch(Exception e){ui(token,()->message("读取本地缓存失败；未修改缓存。"));}try{ImageCacheMaintenance.prune(this,p);}catch(Exception ignored){}});
     }
@@ -332,7 +371,7 @@ public class ReaderActivity extends Activity {
         if(loginProfile==null||!loginProfile.equals(profile)||campusState(loginProfile)==PortalBatchDownloader.State.ACCOUNT_CHANGED){message("校园账号已变化，请使用当前账号重新登录信息门户。");return;}
         if(!CampusPortalParser.SOURCE.equals(source)){source=CampusPortalParser.SOURCE;sourceTitle="校内通知";filter=0;generation++;showList();}
         deferredPortalRefresh.request(loginProfile);
-        message(CampusApplication.auth().isAccessReady()?"门户登录已返回；正在等待当前请求结束后刷新通知…":"校园通道尚未恢复；恢复后将刷新通知，现有缓存仍可阅读。");
+        message(PortalAccess.isReady(this)?"门户登录已返回；正在等待当前请求结束后刷新通知…":"校园通道尚未恢复；恢复后将刷新通知，现有缓存仍可阅读。");
         drainPortalRefresh();
     }
     private boolean drainPortalRefresh() {
@@ -348,7 +387,7 @@ public class ReaderActivity extends Activity {
         final boolean campus=CampusPortalParser.SOURCE.equals(source);
         if(campus&&!CampusConfiguration.isConfigured()){openCampusConfiguration();return;}
         if(campus){applyAccount();if(clearingSession)return;}
-        if(campus&&!CampusApplication.auth().isAccessReady()){message("校园通道未就绪，请从校园连接检查；缓存仍可阅读。");return;}
+
         if(campus)attemptedAutoRefresh=true;
         if(loadMore&&!campus){visibleLimit=Math.min(1000,visibleLimit+100);loadCache();return;}
         if(loadMore&&nextPage==null){message("请先刷新通知；当前分页结束时无需继续加载。");return;}
@@ -358,6 +397,7 @@ public class ReaderActivity extends Activity {
         network.execute(()->{
             try {
                 if(campus) {
+                    PortalAccess.probe(this);
                     if(request!=null){try(CampusNoticeStore store=new CampusNoticeStore(this,p)){int offset=Integer.parseInt(request.parameters.get("start"));if(offset>=store.getRetentionPolicy().maxCachedEntries){refreshUi(requestId,p,()->message("已达到本轮加载上限，可在设置中调整正文条数。"));return;}}}
                     CampusSyncEngine.Result result=CampusSyncEngine.syncPage(this,p,request,false,()->isDestroyed(),
                             (completed,total)->refreshUi(requestId,p,()->{portalVerified=true;CampusApplication.auth().clearPortalAuthenticationRequired();refreshMessage="更新通知 "+completed+" / "+total;updateConnectionStatus();renderStatus();}));
@@ -374,7 +414,7 @@ public class ReaderActivity extends Activity {
                                 if(loadMore)message("后台正在刷新，请稍后再点加载更多；当前页已保留。");
                                 else{deferredPortalRefresh.request(p);message("后台正在刷新，完成后将检查门户并更新通知。");}
                                 break;
-                            case TUNNEL_REQUIRED:portalVerified=false;message("校园通道暂不可用，已缓存内容仍可阅读。");break;
+                            case TUNNEL_REQUIRED:portalVerified=false;message("当前网络暂不可达门户，正在检查登录与连接。");if(!loadMore&&!detailVisible&&!portalLoginInFlight)connect();break;
                             case CANCELLED:case ACCOUNT_CHANGED:message("本次更新已停止，已获取内容保留，可稍后重试。");break;
                             case PARSE_ERROR:message("暂时无法识别门户内容，已缓存内容仍可阅读。");break;
                             default:message("更新未完成，请检查网络后重试；已缓存内容仍可阅读。");
@@ -395,9 +435,9 @@ public class ReaderActivity extends Activity {
     }
     private void loadMoreNotices(){if(busy)return;final String p=profile,s=source;final int token=generation;final NoticeQuery query=libraryFilter.query(s,filter,1000,keywordRules,priorityOnly);worker.execute(()->{try(CampusNoticeStore store=new CampusNoticeStore(this,p)){long count=store.count(query);ui(token,()->{if(count>visibleLimit){if(visibleLimit>=1000){message("已显示1000条本地记录，请用关键词或标签缩小范围。");return;}visibleLimit=Math.min(1000,visibleLimit+100);loadCache();}else if(CampusPortalParser.SOURCE.equals(s))refresh(true);else message("已显示全部匹配的本地订阅文章，可刷新获取更新。");});}catch(Exception e){ui(token,()->message("本地记录读取失败"));}});}
     private PortalBatchDownloader.State campusState(String expectedProfile) {
-        String account=CampusApplication.auth().getProfileId();
+        String account=PortalAccess.account(this);
         if(account!=null&&!account.trim().isEmpty()&&!expectedProfile.equals(MediaSafety.readerProfile(account)))return PortalBatchDownloader.State.ACCOUNT_CHANGED;
-        return account!=null&&!account.trim().isEmpty()&&CampusApplication.auth().isAccessReady()?PortalBatchDownloader.State.READY:PortalBatchDownloader.State.TUNNEL_DISCONNECTED;
+        return account!=null&&!account.trim().isEmpty()&&PortalAccess.isReady(this)?PortalBatchDownloader.State.READY:PortalBatchDownloader.State.TUNNEL_DISCONNECTED;
     }
     private void requireCampus(String expectedProfile) throws IOException {
         if(campusState(expectedProfile)!=PortalBatchDownloader.State.READY)throw new IOException("Campus authentication required");
@@ -415,6 +455,7 @@ public class ReaderActivity extends Activity {
         final boolean[] flags={cached.read,cached.later};final boolean[] opened={false};
         LinearLayout root=column();root.setBackgroundColor(ReaderUi.SURFACE);
         LinearLayout top=row();top.addView(icon("close","返回通知列表",v->showList()),new LinearLayout.LayoutParams(dp(48),dp(48)));TextView sourceName=text(CampusPortalParser.SOURCE.equals(notice.key.source)?"校内通知":sourceTitle,13,MUTED);sourceName.setGravity(Gravity.CENTER_VERTICAL);top.addView(sourceName,new LinearLayout.LayoutParams(0,dp(48),1));root.addView(top);
+        root.addView(new ReaderSummaryPanel(this,AiSummaryPresentation.view(this,p,notice.key)),new LinearLayout.LayoutParams(-1,-2));
         View bar=getLayoutInflater().inflate(R.layout.reader_reader_bottom_bar,root,false);Button unread=bar.findViewById(R.id.reader_btn_read),later=bar.findViewById(R.id.reader_btn_star);updateDetailButtons(unread,later,flags);
         unread.setOnClickListener(v->{opened[0]=true;flags[0]=!flags[0];updateDetailButtons(unread,later,flags);setFlag(notice.key,true,flags[0],null);});
         later.setOnClickListener(v->{flags[1]=!flags[1];updateDetailButtons(unread,later,flags);setFlag(notice.key,false,flags[1],null);});
@@ -462,7 +503,7 @@ public class ReaderActivity extends Activity {
     private void openArticleLink(CampusNotice notice,String owner,String url){for(CampusNotice.Attachment a:notice.attachments)if(a.url.equals(url)){if(ReaderHttp.isCampus(a.url))MediaActions.downloadAttachment(this,owner,a.url,a.name,notice.originalUrl);else openExternal(a.url);return;}openExternal(url);}
     private void showTextSize(){int[] sizes={90,100,110,125,140};String[] names={"较小 · 90%","标准 · 100%","较大 · 110%","大 · 125%","特大 · 140%"};int selected=1;int current=preferences.getInt("reader-text-zoom",100);for(int i=0;i<sizes.length;i++)if(current==sizes[i])selected=i;new AlertDialog.Builder(this).setTitle("正文字号").setSingleChoiceItems(names,selected,(dialog,index)->{preferences.edit().putInt("reader-text-zoom",sizes[index]).apply();if(detailWeb!=null)detailWeb.getSettings().setTextZoom(sizes[index]);dialog.dismiss();}).setNegativeButton("返回",null).show();}
     private void refetchBody(CachedNotice cached){final WebView requestedPage=detailWeb;final String p=profile;final int token=generation;final boolean campus=CampusPortalParser.SOURCE.equals(cached.content.key.source);final Subscription feed=subscription(cached.content.key.source);
-        if(campus&&!CampusApplication.auth().isAccessReady()){connect();return;}
+        if(campus&&!PortalAccess.isReady(this)){connect();return;}
         final ReaderPreferences requestPrefs=new ReaderPreferences(this);final long portalGeneration=requestPrefs.getPortalGeneration(),foregroundGeneration=foregroundRequestGeneration;
         final java.util.function.BooleanSupplier cancelled=()->token!=generation||foregroundGeneration!=foregroundRequestGeneration||(campus&&portalGeneration!=requestPrefs.getPortalGeneration());
         Toast.makeText(this,"正在重新获取正文…",Toast.LENGTH_SHORT).show();network.execute(()->{
@@ -482,6 +523,26 @@ public class ReaderActivity extends Activity {
     }
     private void rowActions(CachedNotice cached) {
         new AlertDialog.Builder(this).setTitle(cached.content.title).setItems(new String[]{cached.read?"标为未读":"标为已读",cached.later?"取消稍后读":"稍后读","编辑标签"},(d,which)->{if(which==2)editTags(cached.content.key);else setFlag(cached.content.key,which==0,which==0?!cached.read:!cached.later,null);}).show();
+    }
+    private void closePreview(){if(previewDialog!=null){previewDialog.dismiss();previewDialog=null;}}
+    private void showPreview(CachedNotice cached){
+        closePreview();final String owner=profile;final int token=generation;LinearLayout page=column();page.setPadding(dp(20),dp(16),dp(20),dp(20));
+        final java.util.function.BooleanSupplier owns=()->owner.equals(profile)&&owner.equals(PortalAccess.currentProfile(this))&&token==generation;
+        TextView title=text(cached.content.title,20,INK);title.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));page.addView(title);
+        TextView meta=text(date(cached.content.publishedAtMillis)+(cached.read?" · 已读":" · 未读")+" · 预览不标为已读",12,MUTED);meta.setPadding(0,dp(8),0,dp(8));page.addView(meta);
+        page.addView(AiSummaryPresentation.view(this,owner,cached.content.key));
+        page.addView(button("查看正文",v->{closePreview();if(owns.getAsBoolean())openNotice(cached.content.key);}));
+        LinearLayout actions=row();actions.addView(button(cached.later?"取消稍后读":"稍后读",v->{closePreview();if(owns.getAsBoolean())setFlag(cached.content.key,false,!cached.later,null);}),new LinearLayout.LayoutParams(0,dp(48),1));actions.addView(button(cached.read?"标为未读":"标为已读",v->{closePreview();if(owns.getAsBoolean())setFlag(cached.content.key,true,!cached.read,null);}),new LinearLayout.LayoutParams(0,dp(48),1));actions.addView(button("标签",v->{closePreview();if(owns.getAsBoolean())editTags(cached.content.key);}),new LinearLayout.LayoutParams(0,dp(48),1));page.addView(actions);
+        LinearLayout feedback=row();feedback.addView(button("多推荐此类",v->{if(owns.getAsBoolean())preferenceFeedback(cached,true);else closePreview();}),new LinearLayout.LayoutParams(0,dp(48),1));feedback.addView(button("不感兴趣",v->{if(owns.getAsBoolean())preferenceFeedback(cached,false);else closePreview();}),new LinearLayout.LayoutParams(0,dp(48),1));page.addView(feedback);
+        page.addView(button("设置时间提醒",v->{closePreview();if(owns.getAsBoolean())chooseReminder(cached);}));
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.addView(page);Dialog dialog=new Dialog(this);dialog.setContentView(scroll);previewDialog=dialog;dialog.show();Window window=dialog.getWindow();if(window!=null){window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(ReaderUi.SURFACE));window.setGravity(Gravity.BOTTOM);window.setLayout(-1,Math.min(dp(600),getResources().getDisplayMetrics().heightPixels*4/5));}
+    }
+    private void preferenceFeedback(CachedNotice cached,boolean more){
+        closePreview();final String p=profile;final int token=generation;worker.execute(()->{boolean saved=RecommendationEngine.feedback(this,p,cached,more);ui(token,()->{message(saved?(more?"已记录，会增加相关主题的推荐":"已记录，会减少相关主题的推荐；可在偏好中重置"):"未更新推荐，可在关注偏好中开启学习或直接选择关注主题");loadCache();});});
+    }
+    private void chooseReminder(CachedNotice cached){
+        final String p=profile;Calendar chosen=Calendar.getInstance(TimeZone.getTimeZone("Asia/Shanghai"));chosen.add(Calendar.HOUR_OF_DAY,1);
+        new DatePickerDialog(this,(date,y,m,d)->{chosen.set(Calendar.YEAR,y);chosen.set(Calendar.MONTH,m);chosen.set(Calendar.DAY_OF_MONTH,d);new TimePickerDialog(this,(time,h,minute)->{chosen.set(Calendar.HOUR_OF_DAY,h);chosen.set(Calendar.MINUTE,minute);chosen.set(Calendar.SECOND,0);chosen.set(Calendar.MILLISECOND,0);long when=chosen.getTimeInMillis();worker.execute(()->{boolean saved=NoticeReminders.schedule(this,p,cached.content.key,when);runOnUiThread(()->{if(!isDestroyed()&&p.equals(profile))Toast.makeText(this,saved?"已设置时间提醒，实际到达可能受系统省电影响":"提醒未保存，请选择未来一年内的时间（最多50条）",Toast.LENGTH_LONG).show();});});},chosen.get(Calendar.HOUR_OF_DAY),chosen.get(Calendar.MINUTE),true).show();},chosen.get(Calendar.YEAR),chosen.get(Calendar.MONTH),chosen.get(Calendar.DAY_OF_MONTH)).show();
     }
     private void openSettings(){startActivity(new Intent(this,ReaderSettingsActivity.class).putExtra("profile",profile));}
     private EditText input(LinearLayout page,String label,String value){page.addView(text(label,15,INK));EditText edit=new EditText(this);edit.setText(value);edit.setSingleLine(false);edit.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(256)});page.addView(edit);return edit;}
@@ -510,7 +571,7 @@ public class ReaderActivity extends Activity {
     }
     private void promptPortalLogin(){
         if(!portalPrompted&&!deferredPortalRefresh.hasRequest()&&resumed&&!detailVisible
-                &&CampusApplication.auth().isAccessReady()&&new ReaderPreferences(this).isPortalAutoRestoreEnabled()){
+                &&PortalAccess.isReady(this)&&new ReaderPreferences(this).isPortalAutoRestoreEnabled()){
             portalPrompted=true;portalLogin(true);
         }
     }
@@ -518,7 +579,7 @@ public class ReaderActivity extends Activity {
     private void portalLogin(boolean automatic){
         if(portalLoginInFlight)return;
         if(automatic&&!PortalSessionCoordinator.shouldAttempt(this,profile))return;
-        if(!CampusApplication.auth().isAccessReady()){if(!automatic)connect();return;}
+        if(!PortalAccess.isReady(this)){if(!automatic)connect();return;}
         if(clearingSession){message("正在切换校园账号，请稍后重新登录门户。");return;}
         portalLoginInFlight=true;
         startActivityForResult(new Intent(this,PortalLoginActivity.class)
@@ -558,6 +619,8 @@ public class ReaderActivity extends Activity {
     private View noticeRow(CachedNotice cached,String mode,Bitmap bitmap){
         boolean card="card".equals(mode);int layout=card?R.layout.reader_item_article_card:"magazine".equals(mode)?R.layout.reader_item_article_magazine:R.layout.reader_item_article_list;
         View row=getLayoutInflater().inflate(layout,list,false);TextView title=row.findViewById(R.id.reader_content_txt);title.setText(cached.content.title);title.setTextColor(cached.read?MUTED:INK);title.setTypeface(Typeface.create("sans-serif",cached.read?Typeface.NORMAL:Typeface.BOLD));
+        TextView summary=row.findViewById(R.id.reader_summary_txt);String snippet=summarySnippets.get(cached.content.key);if(summary!=null){summary.setVisibility(snippet==null||snippet.isEmpty()?View.GONE:View.VISIBLE);summary.setText(snippet==null?"":"AI · "+snippet);}
+        TextView reason=row.findViewById(R.id.reader_reason_txt);String why=recommendationReasons.get(cached.content.key);String topics=topicLabels.get(cached.content.key);String personal=tagText(cached.tags);String explanation=(why==null?(topics==null?"":topics):why)+personal;if(reason!=null){reason.setVisibility(explanation.isEmpty()?View.GONE:View.VISIBLE);reason.setText(explanation);}
         TextView origin=row.findViewById(R.id.reader_title_txt),published=row.findViewById(R.id.reader_date);if(origin!=null){origin.setText(CampusPortalParser.SOURCE.equals(cached.content.key.source)?"校内通知":"订阅");origin.setTextColor(MUTED);}if(published!=null){published.setText(date(cached.content.publishedAtMillis));published.setTextColor(MUTED);}
         ImageView star=row.findViewById(R.id.reader_image_star_lg);if(star!=null){star.setVisibility(cached.later?View.VISIBLE:View.GONE);star.setColorFilter(BLUE);star.setContentDescription("稍后读");}
         View offline=row.findViewById(R.id.reader_image_offline);if(offline!=null)offline.setVisibility(View.GONE);
@@ -565,7 +628,7 @@ public class ReaderActivity extends Activity {
         ImageView image=row.findViewById(R.id.reader_photo_preview);if(image!=null&&bitmap!=null)image.setImageBitmap(bitmap);
         if(card){View gradient=row.findViewById(R.id.reader_card_gradient);if(gradient!=null)gradient.setVisibility(View.GONE);}
         row.setContentDescription(cached.content.title+"，"+date(cached.content.publishedAtMillis)+(cached.read?"，已读":"，未读")+(cached.later?"，稍后读":"")+tagText(cached.tags));
-        // Row actions remain available without a gesture through the native long-press menu.
+        // Long press opens a read-only preview with the same reading-state actions.
         return row;
     }
     private static String tagText(List<NoticeTag> tags){StringBuilder b=new StringBuilder();for(NoticeTag tag:tags)b.append("   #").append(tag.name);return b.toString();}
@@ -593,5 +656,5 @@ public class ReaderActivity extends Activity {
     private static String date(long time){if(time==0)return "未提供日期";SimpleDateFormat f=new SimpleDateFormat("yyyy-MM-dd",Locale.CHINA);f.setTimeZone(TimeZone.getTimeZone("Asia/Shanghai"));return f.format(new Date(time));}
     private static String escape(String text){return text.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;");}
     @Override public void onBackPressed(){if(nativeDrawer!=null&&nativeDrawer.isDrawerOpen(androidx.core.view.GravityCompat.START))closeDrawer();else if(detailVisible)showList();else if(searchInput!=null&&((View)searchInput.getParent()).getVisibility()==View.VISIBLE){((View)searchInput.getParent()).setVisibility(View.GONE);hideKeyboard();}else super.onBackPressed();}
-    @Override protected void onDestroy(){foregroundRequestGeneration++;if(configurationLease!=null){configurationLease.close();configurationLease=null;}mainHandler.removeCallbacks(readiness);if(pendingSearch!=null)mainHandler.removeCallbacks(pendingSearch);if(detailWeb!=null)detailWeb.destroy();worker.shutdown();network.shutdownNow();images.shutdownNow();thumbnails.evictAll();super.onDestroy();}
+    @Override protected void onDestroy(){foregroundRequestGeneration++;closePreview();if(summaryReceiverRegistered){unregisterReceiver(summaryUpdates);summaryReceiverRegistered=false;}if(configurationLease!=null){configurationLease.close();configurationLease=null;}mainHandler.removeCallbacks(readiness);if(pendingSearch!=null)mainHandler.removeCallbacks(pendingSearch);if(detailWeb!=null)detailWeb.destroy();worker.shutdown();network.shutdownNow();images.shutdownNow();thumbnails.evictAll();super.onDestroy();}
 }

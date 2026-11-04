@@ -7,6 +7,6 @@ import android.content.Intent;
 /** Registration only; never performs network/SDK authentication inside a receiver. */
 public final class RefreshBootReceiver extends BroadcastReceiver {
     @Override public void onReceive(Context context,Intent intent){
-        if(intent!=null&&(Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())||Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction())))RefreshScheduler.schedule(context);
+        if(intent!=null&&(Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())||Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction()))){RefreshScheduler.schedule(context);AiAutoSummaries.kick(context);NoticeReminders.restore(context);}
     }
 }

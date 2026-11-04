@@ -10,8 +10,8 @@ android {
         // Initial vendor-SDK proof build follows the supplied Demo's target.
         // Raising targetSdk requires validating the vendor native tunnel lifecycle.
         targetSdk 30
-        versionCode 13
-        versionName '0.8.1-campus'
+        versionCode 14
+        versionName '0.9.0-campus'
         ndk { abiFilters 'arm64-v8a' }
     }
     buildTypes {

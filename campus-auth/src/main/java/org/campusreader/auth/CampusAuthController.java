@@ -79,7 +79,7 @@ public final class CampusAuthController implements SFAuthResultListener, SFTunne
         return CampusConfiguration.accountPreferences(context, accountScope);
     }
     private boolean connectionAllowed() {
-        return CampusConfiguration.isConfigured() && accountScope.equals(CampusSite.scopeId());
+        return CampusConfiguration.isConfigured() && CampusConfiguration.hasConsent() && accountScope.equals(CampusSite.scopeId());
     }
     private void ensureSdkReady() {
         CampusConfiguration.requireConnectionAllowed();

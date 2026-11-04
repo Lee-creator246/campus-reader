@@ -3,6 +3,9 @@ package org.campusreader.reader;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.IntentFilter;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
@@ -46,11 +49,14 @@ public final class AiSummaryActivity extends Activity {
     private boolean interruptedByLeaving;
     static final String LEAVING_NOTICE="上次生成因离开摘要页或锁屏已取消，未自动重试；服务方仍可能计费。已有缓存仍可查看。重新生成时请保持本页前台。";
     private long lastSourceCheck;
+    private boolean receiverRegistered;
+    private final BroadcastReceiver updated=new BroadcastReceiver(){@Override public void onReceive(Context c,Intent i){if(!busy&&settings!=null)reload();}};
+    private boolean contextCurrent(AiEvidence.Snapshot context){return context!=null&&((context.libraryRevision==0&&context.policyCount()==0)||library.isCurrent(context.libraryRevision));}
     private final Runnable monitor=new Runnable(){@Override public void run(){
         if(isDestroyed()||isFinishing())return;
         if(!AiProfile.owns(AiSummaryActivity.this,profile)){cancelActive(false);finish();return;}
         try{
-            if(evidence!=null&&!library.isCurrent(evidence.libraryRevision)){
+            if(evidence!=null&&!contextCurrent(evidence)){
                 dismissSourceDialogs();cancelActive(false);results.removeAllViews();evidence=null;
                 status.setText("政策资料已变化，正在重新检查本地摘要。");reload();
             }else if(busy&&config!=null&&!settings.isCurrent(config)){
@@ -77,7 +83,7 @@ public final class AiSummaryActivity extends Activity {
         ScrollView scroll=new ScrollView(this);scroll.addView(page);setContentView(scroll);
         button(page,"‹ 返回通知正文",this::finish);
         note(page,"AI 通知摘要",23,ReaderUi.INK);title=note(page,"正在读取本机正文…",17,ReaderUi.INK);
-        note(page,"AI 归类的原文摘录，可能漏选或错选，不作资格或政策效力判断。图片和通知附件未解析；请核对全文及其中的条件、例外和时间。",13,ReaderUi.MUTED);
+        note(page,"简洁概述附数字引用，点击数字查看原文依据。图片和附件未解析，日期、条件和例外仍需核对全文。",13,ReaderUi.MUTED);
         policyStatus=note(page,"",13,ReaderUi.MUTED);
         status=note(page,"",14,ReaderUi.BLUE);status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         generate=button(page,"生成摘要",this::confirm);cancel=button(page,"取消本次生成",()->cancelActive(true));cancel.setEnabled(false);
@@ -88,10 +94,11 @@ public final class AiSummaryActivity extends Activity {
     private void openSettings(Class<? extends Activity> activity){if(busy)interruptedByLeaving=true;cancelActive(false);startActivity(new Intent(this,activity).putExtra("profile",profile));}
     @Override protected void onResume(){
         super.onResume();if(settings==null)return;if(!AiProfile.owns(this,profile)){finish();return;}
+        if(!receiverRegistered){IntentFilter filter=new IntentFilter(AiAutoSummaries.ACTION_UPDATED);if(android.os.Build.VERSION.SDK_INT>=33)registerReceiver(updated,filter,Context.RECEIVER_NOT_EXPORTED);else registerReceiver(updated,filter);receiverRegistered=true;}
         main.removeCallbacks(monitor);main.post(monitor);reload();
     }
     @Override protected void onSaveInstanceState(Bundle state){state.putBoolean("ai_interrupted",busy||interruptedByLeaving);super.onSaveInstanceState(state);}
-    @Override protected void onStop(){if(busy)interruptedByLeaving=true;dismissSourceDialogs();cancelActive(false);main.removeCallbacks(monitor);super.onStop();}
+    @Override protected void onStop(){if(receiverRegistered){unregisterReceiver(updated);receiverRegistered=false;}if(busy)interruptedByLeaving=true;dismissSourceDialogs();cancelActive(false);main.removeCallbacks(monitor);super.onStop();}
     @Override protected void onDestroy(){cancelActive(false);main.removeCallbacksAndMessages(null);worker.shutdownNow();super.onDestroy();}
 
     private void reload(){
@@ -99,29 +106,39 @@ public final class AiSummaryActivity extends Activity {
         task=worker.submit(()->{
             try{
                 if(!AiProfile.owns(this,profile))return;
-                SummaryInput loaded;SummaryRecord cached;AiEvidence.Snapshot context;
-                AiSettings.Config service=settings.load();PolicyLibrary.Snapshot policies=library.snapshot();
+                SummaryInput loaded;SummaryRecord cached;AiEvidence.Snapshot context,requestContext;
+                AiSettings.Config service=settings.cacheConfig();PolicyLibrary.Snapshot policies=library.snapshot();
+                AiGroundedSummary legacy=null;AiBriefSummary brief=null;
                 try(CampusNoticeStore store=new CampusNoticeStore(this,profile)){
-                    loaded=store.summaryInput(key);List<String> names=new ArrayList<>();for(NoticeTag tag:store.listTags())names.add(tag.name);
-                    context=loaded==null?null:AiEvidence.build(loaded,policies,names);
-                    cached=context==null?null:store.findSummary(key,loaded.contentHash,context.cacheHash(service.configHash));
+                    loaded=store.summaryInput(key);
+                    context=loaded==null?null:AiAutoSummaries.context(loaded,policies,!settings.automaticEnabled()||settings.automaticPolicies());
+                    requestContext=context;
+                    cached=context==null?null:store.findSummary(key,loaded.contentHash,AiAutoSummaries.cacheHash(context,service));
+                    if(cached==null&&loaded!=null){AiEvidence.Snapshot other=AiAutoSummaries.context(loaded,policies,settings.automaticEnabled()&&!settings.automaticPolicies());SummaryRecord previous=store.findSummary(key,loaded.contentHash,AiAutoSummaries.cacheHash(other,service));if(previous!=null){context=other;cached=previous;}}
+                    if(cached!=null)try{brief=AiBriefSummary.parseCached(cached.resultJson,context);}catch(org.json.JSONException invalid){cached=null;}
+                    if(cached==null&&loaded!=null){
+                        List<String> names=new ArrayList<>();for(NoticeTag tag:store.listTags())names.add(tag.name);
+                        AiEvidence.Snapshot old=AiEvidence.build(loaded,policies,names);
+                        SummaryRecord previous=store.findSummary(key,loaded.contentHash,old.cacheHash(service.configHash));
+                        if(previous!=null)try{legacy=AiGroundedSummary.parseCached(previous.resultJson,old);cached=previous;context=old;}catch(org.json.JSONException invalid){}
+                    }
+                    if(cached==null&&loaded!=null){SummaryRecord core=AiCoreCache.find(store,key,loaded,service);if(core!=null){AiEvidence.Snapshot notice=AiAutoSummaries.context(loaded,new PolicyLibrary.Snapshot(0,java.util.Collections.emptyList()),false);try{brief=AiBriefSummary.parseCached(core.resultJson,notice);context=notice;cached=core;}catch(org.json.JSONException invalid){}}}
                 }
-                AiGroundedSummary parsed=null;
-                if(cached!=null)try{parsed=AiGroundedSummary.parseCached(cached.resultJson,context);}catch(org.json.JSONException invalid){/* Regenerate invalid cache only after confirmation. */}
                 if(loaded!=null)requireSource(loaded);
-                final AiGroundedSummary result=parsed;
+                final AiGroundedSummary oldResult=legacy;final AiBriefSummary result=brief;final AiEvidence.Snapshot chosen=context,forRequest=requestContext;final SummaryRecord record=cached;
                 main.post(()->{
                     if(!active(token)||!library.isCurrent(policies.revision))return;
-                    input=loaded;evidence=context;config=service;title.setText(loaded==null?"正文未缓存或没有可用文字":loaded.title);
+                    input=loaded;evidence=forRequest;config=service;title.setText(loaded==null?"正文未缓存或没有可用文字":loaded.title);
                     if(loaded==null){status.setText("请返回通知重新获取正文。图片通知和附件不参与本版摘要。");generate.setEnabled(false);return;}
-                    policyStatus.setText(context.policyCount()==0
-                            ?(policies.documents.isEmpty()?"尚未导入政策文件。本次仅分析通知文字；可在政策资料库添加文件。":"本地检索未找到候选政策段落；这不代表没有相关规定，可在资料库核对文件与适用范围。")
-                            :"本地检索选入 "+context.policyCount()+" 份政策的部分段落；只作相关参考，未验证适用性或官方效力。发送前可查看完整资料清单。");
-                    generate.setEnabled(service.enabled);generate.setText(result==null?"生成摘要":"重新生成（需要再次确认）");
-                    status.setText(service.enabled?(result==null?"点击生成后，先核对将要发送的完整资料。":"显示已缓存摘要；尚未重新请求。")
+                    policyStatus.setText(chosen.policyCount()==0?"本次只提取通知要点；政策资料是否自动发送由设置决定。":"本次包含相关政策片段，仅作参考，适用性待核对。");
+                    boolean found=result!=null||oldResult!=null;
+                    generate.setEnabled(service.enabled);generate.setText(!found?"生成摘要":settings.automaticEnabled()?"重新生成":"重新生成（需要再次确认）");
+                    status.setText(service.enabled?(found?"显示已缓存摘要；尚未重新请求。":settings.automaticEnabled()?AiAutoSummaries.status(this,profile,key):"点击生成后，先核对将要发送的完整资料。")
                             :"AI 生成已关闭；可在服务设置启用。已有缓存仍可查看。");
                     if(interruptedByLeaving){status.setText(LEAVING_NOTICE);interruptedByLeaving=false;}
-                    if(result!=null)showResult(result,cached.generatedAtMillis,loaded,context);
+                    if(result!=null)showBrief(result,record.generatedAtMillis,loaded,chosen);
+                    else if(oldResult!=null)showResult(oldResult,record.generatedAtMillis,loaded,chosen);
+                    else if(settings.automaticEnabled())AiAutoSummaries.enqueueVisible(this,profile,java.util.Collections.singletonList(key));
                 });
             }catch(Exception failure){main.post(()->{if(active(token)){
                 input=null;evidence=null;status.setText(failure instanceof IllegalArgumentException||failure instanceof IllegalStateException?failure.getMessage():"无法读取正文、摘要或服务设置，请返回后重试。");generate.setEnabled(false);
@@ -135,14 +152,18 @@ public final class AiSummaryActivity extends Activity {
         try{
             service=settings.load();if(!service.enabled)throw new IllegalArgumentException("请先在服务设置启用 AI 摘要。");
             service.provider.endpoint(service.endpoint);AiPolicy.model(service.model);AiPolicy.key(service.key);
-            if(!library.isCurrent(context.libraryRevision))throw new IllegalArgumentException("政策资料已变化，请返回摘要页重新检查。");
+            if(!contextCurrent(context))throw new IllegalArgumentException("政策资料已变化，请返回摘要页重新检查。");
         }catch(RuntimeException failure){status.setText(failure.getMessage());return;}
-        if(settings.usedToday()>=AiPolicy.DAILY_LIMIT){status.setText("今日已达到 20 次本机尝试上限，未发送请求。");return;}
+        if(settings.usedToday()>=settings.dailyLimit()){status.setText("今日已达到本机尝试上限，未发送请求。");return;}
+        if(settings.automaticEnabled()){
+            if(AiAutoSummaries.isPending(this,profile,key)){status.setText("该通知正在自动处理，完成后会更新；离开本页也可继续。");return;}
+            startGeneration(source,service,context);return;
+        }
         LinearLayout content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);content.setPadding(dp(18),dp(8),dp(18),dp(8));
         note(content,"发送到："+URI.create(service.endpoint).getHost()+"\n模型："+service.model+"\n通知："+source.title+
                 "\n下方为本次将发送的完整资料，包括通知文字、选入的政策段落及其填写信息和候选标签。仅发送这些资料与摘要指令，不发送校园登录凭据、图片或附件文件。",13,ReaderUi.INK);
         note(content,"请确认资料允许交给该服务处理。政策段落由本地有限检索选出，可能遗漏相关文件；文件状态与范围由用户填写，应用未验证。",13,ReaderUi.MUTED);
-        note(content,"API 可能收费；今日已尝试 "+settings.usedToday()+" / 20 次。取消或失败也可能计费，无自动重试。",13,0xffb3261e);
+        note(content,"API 可能收费；今日已尝试 "+settings.usedToday()+" / "+settings.dailyLimit()+" 次。取消或失败也可能计费，无自动重试。",13,0xffb3261e);
         TextView preview=note(content,context.exactText,13,ReaderUi.INK);preview.setTextIsSelectable(true);
         ScrollView scroll=new ScrollView(this);scroll.addView(content);
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("确认发送给 AI 服务？").setView(scroll)
@@ -158,32 +179,37 @@ public final class AiSummaryActivity extends Activity {
         }
     }
     private void startGeneration(SummaryInput source,AiSettings.Config service,AiEvidence.Snapshot context){
-        if(busy||!AiProfile.owns(this,profile)||!settings.isCurrent(service)||!library.isCurrent(context.libraryRevision)){
+        if(busy||!AiProfile.owns(this,profile)||!settings.isCurrent(service)||!contextCurrent(context)){
             status.setText("账号、政策或设置已变化，请重新确认。");return;
         }
         final long token=++sequence;config=service;busy=true;interruptedByLeaving=false;generate.setEnabled(false);cancel.setEnabled(true);status.setText("正在提取；请保持本页前台，离开或锁屏会取消。不会自动重试。");
         final AiTransport.Cancellation stop=new AiTransport.Cancellation();cancellation=stop;
         task=worker.submit(()->{
+            boolean leased=false;
             try{
                 AiTransport.Guard guard=()->{
-                    stop.check();if(token!=sequence||!AiProfile.owns(this,profile)||!settings.isCurrent(service)||!library.isCurrent(context.libraryRevision))throw new IOException("STALE");
+                    stop.check();if(token!=sequence||!AiProfile.owns(this,profile)||!settings.isCurrent(service)||!contextCurrent(context))throw new IOException("STALE");
                     requireSource(source);
                 };
-                synchronized(AiSettings.LOCK){guard.check();if(!settings.reserve(service))throw new IOException("QUOTA");}
-                String json=AiTransport.requestJson(service,AiGroundedSummary.instruction(),context.exactText,stop,guard);
-                AiGroundedSummary result=AiGroundedSummary.parse(json,context);guard.check();long generated=System.currentTimeMillis();
+                if(!AiAutoSummaries.beginAttempt(this,profile,key,source.contentHash,true,settings,service,guard))throw new IOException("BUSY");leased=true;
+                String json=AiTransport.requestJson(service,AiBriefSummary.instruction(),context.exactText,stop,guard);
+                AiBriefSummary result=AiBriefSummary.parse(json,context);guard.check();long generated=System.currentTimeMillis();
                 synchronized(AiSettings.LOCK){
                     guard.check();try(CampusNoticeStore store=new CampusNoticeStore(this,profile)){
-                        if(!store.saveSummaryIfCurrent(key,source.contentHash,source.cacheGeneration,context.cacheHash(service.configHash),result.json,generated))throw new IOException("STALE");
+                        if(!store.saveSummaryIfCurrent(key,source.contentHash,source.cacheGeneration,AiAutoSummaries.cacheHash(context,service),result.json,generated)||!AiCoreCache.save(store,key,source,service,result,generated))throw new IOException("STALE");
                     }
                 }
                 guard.check();
+                AiAutoSummaries.finishAttempt(this,profile,key,source.contentHash,"done");leased=false;
+                ReaderNotifications.updateSummary(this,profile,key);
                 main.post(()->{
-                    if(!active(token)||!settings.isCurrent(service)||!library.isCurrent(context.libraryRevision))return;
+                    if(!active(token)||!settings.isCurrent(service)||!contextCurrent(context))return;
                     busy=false;cancel.setEnabled(false);generate.setEnabled(true);generate.setText("重新生成（需要再次确认）");
-                    status.setText("已生成并缓存在本机。今日已尝试 "+settings.usedToday()+" / 20 次。");showResult(result,generated,source,context);
+                    status.setText("已生成并缓存在本机。今日已尝试 "+settings.usedToday()+" / "+settings.dailyLimit()+" 次。");showBrief(result,generated,source,context);
+                    AiAutoSummaries.resultUpdated(this);
                 });
             }catch(Exception failure){main.post(()->{if(!active(token))return;busy=false;cancel.setEnabled(false);generate.setEnabled(settings.enabled());status.setText(AiTransport.failureMessage(failure));});}
+            finally{if(leased)AiAutoSummaries.finishAttempt(this,profile,key,source.contentHash,"uncertain");}
         });
     }
     private boolean active(long token){return !isDestroyed()&&!isFinishing()&&token==sequence&&AiProfile.owns(this,profile);}
@@ -207,6 +233,11 @@ public final class AiSummaryActivity extends Activity {
         if(tell&&wasBusy&&status!=null)status.setText("已取消本次生成；服务方仍可能计费。已有摘要保留。");
     }
 
+    private void showBrief(AiBriefSummary result,long generated,SummaryInput source,AiEvidence.Snapshot context){
+        results.removeAllViews();note(results,"生成于 "+android.text.format.DateFormat.format("MM-dd HH:mm",generated),12,ReaderUi.MUTED);
+        AiSummaryPresentation.render(results,this,profile,key,new AiSummaryPresentation.Cached(result,null,context,source,generated,settings.revision()));
+        for(String tag:result.tags){Button accept=button(results,"采纳标签："+tag,()->{});accept.setOnClickListener(v->acceptTag(tag,source,context,accept));}
+    }
     private void showResult(AiGroundedSummary result,long generated,SummaryInput source,AiEvidence.Snapshot context){
         results.removeAllViews();note(results,"生成于 "+android.text.format.DateFormat.format("MM-dd HH:mm",generated),12,ReaderUi.MUTED);
         for(AiGroundedSummary.Field field:result.fields){
@@ -234,12 +265,12 @@ public final class AiSummaryActivity extends Activity {
         note(results,"逐字摘录只能保证文字来自资料，不能保证 AI 归类正确或条件完整。摘要不自动修改已读、稍后读或标签。",12,ReaderUi.MUTED);
     }
     private void acceptTag(String name,SummaryInput source,AiEvidence.Snapshot context,Button button){
-        if(!AiProfile.owns(this,profile)||!library.isCurrent(context.libraryRevision)){status.setText("资料已变化，请重新查看摘要后采纳。");return;}
+        if(!AiProfile.owns(this,profile)||!contextCurrent(context)){status.setText("资料已变化，请重新查看摘要后采纳。");return;}
         final long token=sequence;button.setEnabled(false);
         task=worker.submit(()->{
             try{
                 synchronized(AiSettings.LOCK){
-                    if(!active(token)||!library.isCurrent(context.libraryRevision))throw new IOException("STALE");
+                    if(!active(token)||!contextCurrent(context))throw new IOException("STALE");
                     try(CampusNoticeStore store=new CampusNoticeStore(this,profile)){
                         android.database.sqlite.SQLiteDatabase db=store.getWritableDatabase();db.beginTransaction();
                         try{
@@ -259,7 +290,7 @@ public final class AiSummaryActivity extends Activity {
         final long token=sequence;
         task=worker.submit(()->{
             try{
-                requireSource(source);if(!library.isCurrent(context.libraryRevision))throw new IOException("STALE");
+                requireSource(source);if(!contextCurrent(context))throw new IOException("STALE");
                 main.post(()->{if(active(token)&&library.isCurrent(context.libraryRevision))displayPassage(unit);});
             }catch(Exception changed){main.post(()->{if(active(token)){
                 dismissSourceDialogs();results.removeAllViews();status.setText("通知或政策资料已变化，请重新查看摘要。");reload();

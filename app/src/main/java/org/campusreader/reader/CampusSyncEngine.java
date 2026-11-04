@@ -39,7 +39,7 @@ public final class CampusSyncEngine {
     }
     private CampusSyncEngine(){}
     public static SyncGate.Lease tryAcquire(String profile){return SyncGate.tryAcquire(profile);}
-    public static String currentProfile(){String account=CampusApplication.auth().getProfileId();return account==null||account.trim().isEmpty()?"":MediaSafety.readerProfile(account);}
+    public static String currentProfile(){String p=PortalAccess.currentProfile();return "local".equals(p)?"":p;}
     public static Result syncPage(Context context,String profile,CampusPortalParser.MoreRequest request,boolean background,CancelCheck cancel){
         return syncPage(context,profile,request,background,cancel,null);
     }
@@ -49,9 +49,12 @@ public final class CampusSyncEngine {
         // Include short-circuits (busy, offline, no cookie, cancelled), not just downloaded pages.
         new ReaderPreferences(context).recordResult(result);
         NotificationHistory.refresh(context,result,background);
+        if(!background&&(result.status==Status.SUCCESS||result.status==Status.PARTIAL))ReaderNotifications.noteForegroundBaseline(context,profile);
+        if(profile!=null&&profile.equals(currentProfile())&&!result.insertedKeys.isEmpty())AiAutoSummaries.enqueueNew(context,profile,result.insertedKeys);
         return result;
     }
     private static Result performSync(Context context,String profile,CampusPortalParser.MoreRequest request,boolean background,CancelCheck cancel,ProgressListener progress){
+        if(profile!=null&&profile.startsWith("campus:")&&!PortalAccess.isReady(context))PortalAccess.probe(context);
         if(profile==null||!profile.startsWith("campus:"))return result(Status.NO_PROFILE,profile,0,0,0,0,request);
         SyncGate.Lease lease=tryAcquire(profile);
         if(lease==null)return result(Status.BUSY,profile,0,0,0,0,request);
@@ -151,7 +154,7 @@ public final class CampusSyncEngine {
     private static Status check(String profile,long generation,ReaderPreferences prefs,CancelCheck cancel,long deadline){
         if(Thread.currentThread().isInterrupted()||(cancel!=null&&cancel.isCancelled())||SystemClock.elapsedRealtime()>=deadline)return Status.CANCELLED;
         if(!profile.equals(currentProfile())||prefs.getPortalGeneration()!=generation)return Status.ACCOUNT_CHANGED;
-        return CampusApplication.auth().isAccessReady()?null:Status.TUNNEL_REQUIRED;
+        return PortalAccess.isReady()?null:Status.TUNNEL_REQUIRED;
     }
     private static void signalPortal(Context context,String profile,long generation,boolean required){new Handler(Looper.getMainLooper()).post(()->{
         if(!profile.equals(currentProfile())||new ReaderPreferences(context).getPortalGeneration()!=generation)return;

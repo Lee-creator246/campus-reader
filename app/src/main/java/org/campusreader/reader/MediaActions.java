@@ -57,7 +57,7 @@ public final class MediaActions {
     }
     public static void viewDownloads(Activity activity){activity.startActivity(new Intent(activity,MediaDownloadsActivity.class));}
     static boolean alive(Activity activity){return !activity.isFinishing()&&!activity.isDestroyed();}
-    public static String activeProfile(){return org.campusreader.auth.CampusConfiguration.isConfigured()?MediaSafety.readerProfile(org.campusreader.auth.CampusApplication.auth().getProfileId()):"local";}
+    public static String activeProfile(){return org.campusreader.auth.CampusConfiguration.isConfigured()?PortalAccess.currentProfile():"local";}
     static boolean currentProfile(String profile){return profile!=null&&profile.equals(activeProfile());}
     static boolean currentEntry(MediaTransfer.Entry entry){return entry!=null&&entry.profileHash.equals(MediaTransfer.hash(activeProfile()));}
     static void toast(Context context,String value){Toast.makeText(context.getApplicationContext(),value,Toast.LENGTH_LONG).show();}
@@ -89,7 +89,7 @@ public final class MediaActions {
                 if(!currentEntry(entry))throw new IOException("Profile changed");
                 ContentValues values=new ContentValues();values.put(MediaStore.Images.Media.DISPLAY_NAME,entry.name);
                 values.put(MediaStore.Images.Media.MIME_TYPE,entry.mime);
-                values.put(MediaStore.Images.Media.RELATIVE_PATH,Environment.DIRECTORY_PICTURES+"/校园阅读");
+                values.put(MediaStore.Images.Media.RELATIVE_PATH,Environment.DIRECTORY_PICTURES+"/北邮人信息");
                 values.put(MediaStore.Images.Media.IS_PENDING,1);
                 ContentResolver resolver=activity.getContentResolver();
                 uri=resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values);
@@ -98,7 +98,7 @@ public final class MediaActions {
                     if(output==null)throw new IOException("No output stream");MediaSafety.copyBounded(input,output,MediaTransfer.MAX_IMAGE,entry.file.length());
                 }
                 values.clear();values.put(MediaStore.Images.Media.IS_PENDING,0);resolver.update(uri,values,null,null);
-                MAIN.post(()->toast(activity,"已保存到相册“校园阅读”，可在企业微信从相册选择识别二维码"));
+                MAIN.post(()->toast(activity,"已保存到相册“北邮人信息”，可在企业微信从相册选择识别二维码"));
             }catch(Exception error){if(uri!=null)activity.getContentResolver().delete(uri,null,null);MAIN.post(()->toast(activity,"保存相册失败，可选择另存到文件"));}
         });
     }
