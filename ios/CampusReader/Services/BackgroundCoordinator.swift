@@ -1,6 +1,7 @@
 import UIKit
 import BackgroundTasks
 import UserNotifications
+import CampusReaderCore
 
 @MainActor final class BackgroundCoordinator {
     static let shared = BackgroundCoordinator()
@@ -37,16 +38,29 @@ import UserNotifications
     }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .list])
+        Task { @MainActor in
+            guard let model = BackgroundCoordinator.shared.model,
+                  notification.request.content.userInfo["profile"] as? String == model.profileID,
+                  model.settings.notifications else { completionHandler([]); return }
+            let ids = notification.request.content.userInfo["notices"] as? [String] ?? []
+            let reminder = notification.request.identifier.hasPrefix("reminder-")
+            guard !ids.isEmpty, ids.allSatisfy({ id in
+                guard let row = model.library.notices.first(where: { $0.id == id }) else { return false }
+                return (reminder || !row.isRead) && !Recommendation.isBlocked(row, preferences: model.settings.preferences)
+            }) else { completionHandler([]); return }
+            completionHandler([.banner, .list])
+        }
     }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         Task { @MainActor in
             defer { completionHandler() }
-            guard let model = BackgroundCoordinator.shared.model,
-                  response.notification.request.content.userInfo["profile"] as? String == model.profileID,
+            guard let model = BackgroundCoordinator.shared.model else { return }
+            await model.start(background: true)
+            guard response.notification.request.content.userInfo["profile"] as? String == model.profileID,
                   let id = response.notification.request.content.userInfo["notice"] as? String,
-                  let notice = model.library.notices.first(where: { $0.id == id }) else { return }
+                  let notice = model.library.notices.first(where: { $0.id == id }),
+                  !Recommendation.isBlocked(notice, preferences: model.settings.preferences) else { return }
             switch response.actionIdentifier {
             case "READ": model.read(id, true)
             case "LATER": model.later(id, true)

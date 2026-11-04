@@ -60,7 +60,7 @@ struct ReaderSettingsView: View {
                 Button("按当前规则清理缓存") { model.cleanCache() }
             }
             Section("账号") {
-                Button("重新登录信息门户") { model.showLogin = true }
+                Button("重新登录信息门户") { model.loginAutomatically = false; model.showLogin = true }
                 Button("删除已保存门户密码") { do { try model.portal.forgetSavedPassword(); model.status = "已删除本机保存的门户密码" } catch { model.status = "删除失败，请解锁设备后重试。" } }
                 Button("退出当前账号", role: .destructive) { Task { await model.logout() } }
                 Text("密码与 API Key 存在本机钥匙串；门户和正文使用学校现有 HTTP 地址。校园账号不会发送给 AI。退出保留本机阅读文件，下次同一账号登录可继续使用。").font(.footnote).foregroundStyle(.secondary)

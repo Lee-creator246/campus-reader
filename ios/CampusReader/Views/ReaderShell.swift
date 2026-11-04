@@ -45,7 +45,7 @@ struct ReaderShell: View {
                         Section("我的标签") { ForEach(model.allTags, id: \.self) { tag in Button(tag) { model.tag = tag; model.topic = nil; sidebar = false } } }
                     }
                     Section("连接与设置") {
-                        Button { sidebar = false; model.showLogin = true } label: { Label("门户账号与连接", systemImage: "person.crop.circle") }
+                        Button { sidebar = false; model.loginAutomatically = false; model.showLogin = true } label: { Label("门户账号与连接", systemImage: "person.crop.circle") }
                         destinationButton("刷新与提醒记录", icon: "clock.arrow.circlepath", value: .history)
                         destinationButton("阅读与通知设置", icon: "gearshape", value: .settings)
                         destinationButton("体验反馈", icon: "bubble.left", value: .feedback)
@@ -69,7 +69,7 @@ struct ReaderShell: View {
                 }.toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { destination = nil } } }
             }
         }
-        .sheet(isPresented: $model.showLogin) { PortalLoginView(service: portal, onAuthenticated: model.authenticated) }
+        .sheet(isPresented: $model.showLogin) { PortalLoginView(service: portal, onAuthenticated: model.authenticated, automaticallyRestore: model.loginAutomatically) }
         .sheet(isPresented: $model.showInterests) { NavigationStack { InterestsView(model: model) } }
         .sheet(item: $model.selectedNotice) { notice in
             NavigationStack { NoticeDetailView(model: model, ai: model.ai, notice: notice) }
@@ -106,7 +106,7 @@ struct ReaderListView: View {
                     Text(model.status).font(.footnote).foregroundStyle(.secondary).listRowSeparator(.hidden)
                 }
                 if model.portal.sessionState == .loginRequired {
-                    Button("门户会话已过期 · 重新登录") { model.showLogin = true }
+                    Button("门户会话已过期 · 重新登录") { model.loginAutomatically = true; model.showLogin = true }
                 }
                 if model.notices.isEmpty {
                     VStack(spacing: 12) { Image(systemName: "tray").font(.largeTitle); Text("暂时没有匹配的通知"); Text("可刷新列表，或调整标签与屏蔽规则。已缓存的内容不会因登录过期而删除。").font(.footnote) }.foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, 40)

@@ -66,7 +66,7 @@ struct NoticeDetailView: View {
                         Text(ai.status).font(.footnote).foregroundStyle(.secondary)
                         Button("生成 / 重试摘要") {
                             let value = current
-                            Task { do { _ = try await ai.summarize(value, policies: model.policies.passages(for: value)) } catch { self.error = error.localizedDescription } }
+                            Task { do { try await model.summarize(value) } catch { self.error = error.localizedDescription } }
                         }.disabled(ai.isBusy || !current.hasBody)
                     }.padding().background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 14))
                 }

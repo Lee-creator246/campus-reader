@@ -81,9 +81,10 @@ public struct LibraryState: Codable, Sendable {
     @discardableResult public mutating func enforceRetention(policy: RetentionPolicy = RetentionPolicy(), now: Date = Date()) -> RetentionResult {
         var result = RetentionResult()
         let maxBodies = min(2000, max(0, policy.maximumBodies)), maxBytes = min(200 * 1024 * 1024, max(0, policy.maximumBodyBytes))
+        let ageCleanupEnabled = policy.readBodyHours != -1
         let readHours = min(8760, max(0, policy.readBodyHours.isFinite ? policy.readBodyHours : 24))
         let cutoff = now.addingTimeInterval(-readHours * 3600)
-        for i in notices.indices where notices[i].hasBody && notices[i].isRead && !notices[i].later && notices[i].tags.isEmpty {
+        for i in notices.indices where ageCleanupEnabled && notices[i].hasBody && notices[i].isRead && !notices[i].later && notices[i].tags.isEmpty {
             if let readAt = notices[i].readAt, readAt <= cutoff { clearBody(at: i); result.removedBodies += 1 }
         }
         let ordered = notices.indices.filter { notices[$0].hasBody }.sorted { a, b in

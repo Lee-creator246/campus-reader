@@ -28,6 +28,7 @@ struct AISummaryCard: View {
             Text("摘要可能遗漏条件；重要事项请点数字核对原文。").font(.caption2).foregroundStyle(.secondary)
         }
         .padding(16).background(Color.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .onChange(of: summary) { _ in evidence = nil }
         .sheet(item: $evidence) { citation in
             NavigationStack {
                 ScrollView {

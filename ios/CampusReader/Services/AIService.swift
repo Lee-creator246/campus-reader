@@ -84,6 +84,7 @@ import CampusReaderCore
     func summarize(_ notice: Notice, policies: [PolicyPassage] = [], manual: Bool = true) async throws -> CitedSummary {
         guard storageOK, !profile.isEmpty else { throw AIError.storage }
         guard configuration.enabled else { throw AIError.disabled }
+        guard UIApplication.shared.applicationState == .active else { throw AIError.cancelled }
         guard !isBusy else { throw AIError.busy }
         let config = try configuration.validated()
         guard let keyData = try KeychainStore.read(credentialKey(config)), let key = String(data: keyData, encoding: .utf8), !key.isEmpty else { throw AIError.missingKey }
@@ -96,7 +97,10 @@ import CampusReaderCore
         currentNotices[notice.id] = notice; activeNotice = notice
         isBusy = true; status = "正在生成并核对原文依据…"
         let request = AITransport(); transport = request
+        // Finish only an already-authorized foreground request; this is not a background scheduler.
+        let continuationTask = UIApplication.shared.beginBackgroundTask(withName: "FinishSummary") { request.cancel() }
         defer {
+            if continuationTask != .invalid { UIApplication.shared.endBackgroundTask(continuationTask) }
             if generation == revision {
                 isBusy = false; transport = nil; activeNotice = nil
                 if !state.queue.contains(where: { $0.id == notice.id }) { currentNotices.removeValue(forKey: notice.id); passages.removeValue(forKey: notice.id) }
@@ -148,13 +152,13 @@ import CampusReaderCore
         do { try save(); cacheRevision += 1 } catch { status = AIError.storage.localizedDescription }
     }
     private func kick() {
-        guard pumpTask == nil, !isBusy, configuration.enabled, configuration.automatic else { return }
+        guard UIApplication.shared.applicationState == .active, pumpTask == nil, !isBusy, configuration.enabled, configuration.automatic else { return }
         let token = generation
         pumpTask = Task { [weak self] in
             guard let self else { return }
             var quotaReached = false
             for _ in 0..<3 {
-                guard !Task.isCancelled, token == self.generation,
+                guard !Task.isCancelled, token == self.generation, UIApplication.shared.applicationState == .active,
                       let queued = self.state.queue.first(where: { self.currentNotices[$0.id]?.bodyVersion == $0.version }),
                       let notice = self.currentNotices[queued.id] else { break }
                 do { _ = try await self.summarize(notice, policies: self.passages[notice.id] ?? [], manual: false) }
@@ -175,7 +179,18 @@ import CampusReaderCore
         var directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
         var values = URLResourceValues(); values.isExcludedFromBackup = true; try directory.setResourceValues(values)
-        let data = try JSONEncoder().encode(state); guard data.count < 8 * 1024 * 1024 else { throw AIError.tooLarge }
+        var data = try JSONEncoder().encode(state)
+        // Reference context is intentionally retained for verification, so entry count alone
+        // cannot bound bytes. Evict only old summaries, never billing/attempt tombstones.
+        if data.count > 6 * 1024 * 1024 {
+            let oldest = state.cache.sorted { $0.value.summary.generatedAt < $1.value.summary.generatedAt }.map(\.key)
+            for key in oldest where state.cache.count > 1 {
+                state.cache.removeValue(forKey: key)
+                data = try JSONEncoder().encode(state)
+                if data.count <= 6 * 1024 * 1024 { break }
+            }
+        }
+        guard data.count < 8 * 1024 * 1024 else { throw AIError.tooLarge }
         try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 }

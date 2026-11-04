@@ -33,6 +33,7 @@ struct RefreshRecord: Codable, Identifiable {
     @Published private(set) var refreshing = false
     @Published private(set) var ready = false
     @Published var showLogin = false
+    @Published var loginAutomatically = true
     @Published var showInterests = false
     @Published var selectedNotice: Notice?
     @Published var mode = ReaderMode.recommended
@@ -43,11 +44,16 @@ struct RefreshRecord: Codable, Identifiable {
     @Published private(set) var nextPage: MoreRequest?
     private(set) var profileID = ""
     private var revision = 0
+    var sessionRevision: Int { revision }
     private var writable = false
     private(set) var previewMode = false
     var lastRefreshSucceeded = false
     private var initialized = false
     private var task: Task<Void, Never>?
+    private var startupTask: Task<Void, Never>?
+    private var summaryEnqueueTask: Task<Void, Never>?
+    private var lastForegroundCheck = Date.distantPast
+    private var restorePresentedThisLaunch = false
 
     init() { policies.onChange = { [weak self] in self?.ai.policiesChanged() } }
     var notices: [Notice] {
@@ -57,16 +63,38 @@ struct RefreshRecord: Codable, Identifiable {
     var allTags: [String] { Array(Set(library.notices.flatMap(\.tags))).sorted() }
     var unreadCount: Int { library.notices.filter { !$0.isRead && !Recommendation.isBlocked($0, preferences: settings.preferences) }.count }
     func start(background: Bool = false) async {
-        guard !initialized else { return }; initialized = true
+        if let startupTask { await startupTask.value; return }
+        guard !initialized else { return }
+        let job = Task { @MainActor in await self.bootstrap(background: background) }
+        startupTask = job; await job.value; startupTask = nil
+        if !background { await foreground() }
+    }
+    private func bootstrap(background: Bool) async {
+        initialized = true
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-demo") { loadDemo(); return }
         if ProcessInfo.processInfo.arguments.contains("--ui-testing") { ready = true; return }
         #endif
         await portal.restore()
-        if portal.hasAccount { activate(); if settings.refreshOnOpen && !background { await refresh() } }
+        if portal.canReadCachedAccount { activate() }
         ready = true
         BackgroundCoordinator.shared.model = self
         BackgroundCoordinator.shared.schedule(enabled: settings.backgroundRefresh, minutes: settings.intervalMinutes)
+    }
+    func foreground() async {
+        await start()
+        guard !previewMode, !showLogin else { return }
+        await portal.restore()
+        if portal.canReadCachedAccount && (!writable || portal.profileID != profileID) { activate() }
+        guard writable else { return }
+        enqueueSummaries()
+        if settings.refreshOnOpen && Date().timeIntervalSince(lastForegroundCheck) > 60 {
+            lastForegroundCheck = Date(); await refresh(); requestAutomaticRestoreIfNeeded()
+        }
+    }
+    private func requestAutomaticRestoreIfNeeded() {
+        guard !restorePresentedThisLaunch, portal.sessionState == .loginRequired, !profileID.isEmpty else { return }
+        restorePresentedThisLaunch = true; loginAutomatically = true; showLogin = true
     }
     func authenticated() {
         activate(); showLogin = false
@@ -75,14 +103,14 @@ struct RefreshRecord: Codable, Identifiable {
     }
     func accountSelectionChanged() {
         guard !previewMode, !profileID.isEmpty, profileID != portal.profileID else { return }
-        revision += 1; task?.cancel(); refreshing = false; selectedNotice = nil
+        revision += 1; task?.cancel(); summaryEnqueueTask?.cancel(); refreshing = false; selectedNotice = nil
         ai.activate(profile: ""); profileID = ""; writable = false
         library = LibraryState(); history = []; nextPage = nil
         ReaderNotifications.shared.cancelAll()
     }
     func activate() {
         let next = portal.profileID
-        guard !next.isEmpty, next != profileID else { return }
+        guard !next.isEmpty, next != profileID || !writable else { return }
         revision += 1; task?.cancel(); refreshing = false; profileID = next
         library = LibraryState(); settings = ReaderSettings(); history = []; nextPage = nil; selectedNotice = nil; writable = false
         ai.activate(profile: next); policies.activate(profile: next)
@@ -144,7 +172,7 @@ struct RefreshRecord: Codable, Identifiable {
                 let added = library.notices.filter { inserted.contains($0.id) }
                 await ReaderNotifications.shared.publish(added, model: self)
             }
-            enqueueSummaries(newIDs: inserted)
+            if !background { enqueueSummaries(newIDs: inserted) }
         } catch {
             guard owns(owner, token) else { return }
             status = error is CancellationError ? "刷新已暂停，已有内容保留。" : error.localizedDescription
@@ -154,17 +182,36 @@ struct RefreshRecord: Codable, Identifiable {
         }
     }
     func enqueueSummaries(newIDs: [String] = []) {
-        guard !previewMode else { return }
+        guard !previewMode, ai.configuration.enabled, ai.configuration.automatic else { return }
         let candidates = newIDs.isEmpty ? Array(notices.prefix(10)) : library.notices.filter { newIDs.contains($0.id) }.prefix(20).map { $0 }
-        for notice in candidates where notice.hasBody && !Recommendation.isBlocked(notice, preferences: settings.preferences) {
-            ai.enqueue([notice], policies: policies.passages(for: notice), newNotices: !newIDs.isEmpty)
+        let owner = profileID, token = revision, configuration = ai.configuration
+        summaryEnqueueTask?.cancel()
+        summaryEnqueueTask = Task { @MainActor in
+            for notice in candidates where notice.hasBody && !Recommendation.isBlocked(notice, preferences: settings.preferences) {
+                let passages = configuration.sharePolicies ? await policies.passages(for: notice) : []
+                guard !Task.isCancelled, owns(owner, token), configuration == ai.configuration,
+                      library.notices.first(where: { $0.id == notice.id })?.bodyVersion == notice.bodyVersion,
+                      !Recommendation.isBlocked(notice, preferences: settings.preferences) else { return }
+                ai.enqueue([notice], policies: passages, newNotices: !newIDs.isEmpty)
+            }
         }
+    }
+    func summarize(_ notice: Notice) async throws {
+        let owner = profileID, token = revision, configuration = ai.configuration
+        guard !Recommendation.isBlocked(notice, preferences: settings.preferences) else { throw PortalError.cancelled }
+        let passages = configuration.sharePolicies ? await policies.passages(for: notice) : []
+        guard owns(owner, token), configuration == ai.configuration,
+              library.notices.first(where: { $0.id == notice.id })?.bodyVersion == notice.bodyVersion,
+              !Recommendation.isBlocked(notice, preferences: settings.preferences) else { throw PortalError.cancelled }
+        _ = try await ai.summarize(notice, policies: passages)
     }
     func ensureBody(_ notice: Notice) async {
         guard !notice.hasBody, !previewMode else { return }; let owner = profileID, token = revision
         do {
             let detail = try await portal.fetchDetail(notice)
-            guard owns(owner, token) else { return }; _ = library.merge([detail], now: Date()); try persist()
+            guard owns(owner, token) else { return }
+            _ = library.merge([detail], now: Date()); library.markRead(id: notice.id, read: true, now: Date())
+            _ = library.enforceRetention(policy: settings.retention, now: Date()); try persist()
         } catch { if owns(owner, token) { status = error.localizedDescription } }
     }
     func read(_ id: String, _ value: Bool) { library.markRead(id: id, read: value, now: Date()); saveMutation() }
@@ -194,9 +241,9 @@ struct RefreshRecord: Codable, Identifiable {
     }
     func removeFeed(_ id: String) { library.subscriptions.removeAll { $0.id == id }; saveMutation() }
     func logout() async {
-        revision += 1; task?.cancel(); refreshing = false; selectedNotice = nil
-        ReaderNotifications.shared.cancelAll(); await portal.logout()
-        profileID = ""; ai.activate(profile: ""); library = LibraryState(); settings = ReaderSettings(); history = []; writable = false; nextPage = nil; showLogin = false
+        revision += 1; task?.cancel(); summaryEnqueueTask?.cancel(); refreshing = false; selectedNotice = nil
+        ai.activate(profile: ""); ReaderNotifications.shared.cancelAll(); await portal.logout()
+        profileID = ""; library = LibraryState(); settings = ReaderSettings(); history = []; writable = false; nextPage = nil; showLogin = false
     }
     #if DEBUG
     private func loadDemo() {

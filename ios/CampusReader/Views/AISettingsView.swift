@@ -29,7 +29,7 @@ struct AISettingsView: View {
                 Toggle("允许发送相关政策片段", isOn: $draft.sharePolicies).disabled(!draft.enabled)
                 Text("启用后，通知标题与有限正文会发送给你配置的服务，可能计费。政策片段需单独授权；图片、附件、校园密码和个人兴趣不会发送。自动任务失败后不盲目重试。").font(.caption).foregroundStyle(.secondary)
                 Stepper("每日最多尝试 \(draft.dailyLimit) 次", value: $draft.dailyLimit, in: 1...100)
-                Text("失败或取消也计入次数。修改上限、清摘要不会退还已经使用的次数。后台执行由 iOS 安排。").font(.caption).foregroundStyle(.secondary)
+                Text("失败或取消也计入次数。修改上限、清摘要不会退还已经使用的次数。自动摘要在前台生成，切到后台仅尝试完成已发出的请求。").font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 Button(draft.automatic && draft.enabled ? "保存并开启自动摘要" : "保存设置") {
@@ -48,6 +48,7 @@ struct AISettingsView: View {
             }
         }.navigationTitle("AI 摘要")
             .onAppear { draft = service.configuration }
+            .onChange(of: service.configuration) { next in draft = next; key = "" }
             .onDisappear { key = "" }
             .confirmationDialog("清除已有摘要？阅读状态与标签保留，自动尝试记录和次数不清零。", isPresented: $confirmClear, titleVisibility: .visible) {
                 Button("清除摘要", role: .destructive) { service.clearCache() }

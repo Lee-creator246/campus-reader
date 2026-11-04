@@ -9,6 +9,7 @@ import SwiftUI
             ReaderShell(model: model, portal: model.portal)
                 .task { await model.start() }
                 .onChange(of: phase) { next in
+                    if next == .active { Task { await model.foreground() } }
                     if next == .background {
                         BackgroundCoordinator.shared.schedule(enabled: model.settings.backgroundRefresh, minutes: model.settings.intervalMinutes)
                     }

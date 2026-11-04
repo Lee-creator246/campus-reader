@@ -112,6 +112,49 @@ final class PortalServiceTests: XCTestCase {
         form["action"] = PortalConfiguration.login.absoluteString; form["passwords"] = 2
         XCTAssertFalse(PortalFormPolicy.accepts(form))
     }
+    func testAuthenticationRedirectKeepsInitialSessionCookieForWebLogin() async throws {
+        let mock = MockPortalTransport()
+        mock.handler = { request in
+            Self.response(request, status: 302, headers:["Location":PortalConfiguration.login.absoluteString,"Set-Cookie":"session-for-callback=synthetic; Path=/; HttpOnly"])
+        }
+        let service = PortalService(transport:mock)
+        try await service.selectAccount("synthetic-callback-account")
+        XCTAssertFalse(service.canReadCachedAccount)
+        do { _ = try await service.fetchList(); XCTFail("Login required") }
+        catch PortalError.authenticationRequired { }
+        let cookies = await service.websiteDataStore.httpCookieStore.allCookies()
+        XCTAssertTrue(cookies.contains { $0.name == "session-for-callback" && $0.value == "synthetic" })
+        XCTAssertEqual(service.sessionState, .loginRequired)
+        XCTAssertFalse(service.canReadCachedAccount)
+        for cookie in cookies { await service.websiteDataStore.httpCookieStore.delete(cookie) }
+    }
+    func testAutomaticRetryCooldownAndPauseSurviveNewService() async throws {
+        let service = PortalService(transport:MockPortalTransport())
+        try await service.selectAccount("synthetic-cooldown-account")
+        let paused = "portal-auto-paused:" + service.profileID, next = "portal-auto-next:" + service.profileID
+        UserDefaults.standard.removeObject(forKey:paused); UserDefaults.standard.removeObject(forKey:next)
+        defer { UserDefaults.standard.removeObject(forKey:paused); UserDefaults.standard.removeObject(forKey:next) }
+        XCTAssertTrue(service.automaticRestoreAllowed)
+        service.noteAutomaticAttempt(); XCTAssertFalse(service.automaticRestoreAllowed)
+        UserDefaults.standard.removeObject(forKey:next); service.pauseAutomaticRestore()
+        let restarted = PortalService(transport:MockPortalTransport())
+        try await restarted.selectAccount("synthetic-cooldown-account")
+        XCTAssertFalse(restarted.automaticRestoreAllowed)
+    }
+    func testAccountSwitchUsesANewWebStoreSoLateWritesCannotCrossAccounts() async throws {
+        let service = PortalService(transport:MockPortalTransport())
+        try await service.selectAccount("synthetic-owner-a")
+        let oldStore = service.websiteDataStore
+        let oldProfile = service.profileID
+        try await service.selectAccount("synthetic-owner-b")
+        XCTAssertFalse(oldStore === service.websiteDataStore)
+        XCTAssertNotEqual(oldProfile, service.profileID)
+        XCTAssertFalse(service.canReadCachedAccount)
+        let late = HTTPCookie(properties:[.name:"late-old-owner",.value:"synthetic",.domain:"my.bupt.edu.cn",.path:"/"])!
+        await oldStore.httpCookieStore.setCookie(late)
+        let current = await service.websiteDataStore.httpCookieStore.allCookies()
+        XCTAssertFalse(current.contains { $0.name == "late-old-owner" })
+    }
     func testURLBoundariesRejectUserInfoPortsAndSiblingHosts() {
         for value in ["http://user@my.bupt.edu.cn/list.jsp", "http://my.bupt.edu.cn:8080/list.jsp", "http://my.bupt.edu.cn.evil.invalid/list.jsp", "https://auth.bupt.edu.cn:444/authserver/login"] {
             XCTAssertFalse(PortalConfiguration.web(URL(string:value)!))
@@ -125,7 +168,7 @@ final class PortalServiceTests: XCTestCase {
 private final class MockPortalTransport: PortalTransport {
     var requests: [URLRequest] = []
     var handler: ((URLRequest) throws -> PortalHTTPResponse)!
-    func get(_ request: URLRequest, maxBytes: Int) async throws -> PortalHTTPResponse {
+    func get(_ request: URLRequest, maxBytes: Int, allowPrefix: Bool) async throws -> PortalHTTPResponse {
         requests.append(request)
         return try handler(request)
     }

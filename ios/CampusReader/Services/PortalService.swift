@@ -20,14 +20,17 @@ struct PortalCookieJar {
         let fields = response.allHeaderFields.reduce(into: [String: String]()) { result, item in
             if let key = item.key as? String { result[key] = String(describing: item.value) }
         }
-        for cookie in HTTPCookie.cookies(withResponseHeaderFields: fields, for: url) { set(cookie); received.append(cookie) }
+        for cookie in HTTPCookie.cookies(withResponseHeaderFields: fields, for: url) where Self.allowed(cookie) { set(cookie); received.append(cookie) }
     }
     mutating func set(_ cookie: HTTPCookie) {
-        let domain = cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
-        guard ["my.bupt.edu.cn", "bupt.edu.cn"].contains(domain), cookie.value.utf8.count < 8192 else { return }
+        guard Self.allowed(cookie) else { return }
         cookies.removeAll { $0.name == cookie.name && $0.domain == cookie.domain && $0.path == cookie.path }
         if cookie.expiresDate.map({ $0 <= Date() }) != true { cookies.append(cookie) }
         if cookies.count > 128 { cookies.removeFirst(cookies.count - 128) }
+    }
+    private static func allowed(_ cookie: HTTPCookie) -> Bool {
+        let domain = cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        return ["my.bupt.edu.cn", "bupt.edu.cn"].contains(domain) && cookie.value.utf8.count < 8192
     }
     func header(for url: URL) -> String? {
         guard PortalConfiguration.portal(url), let host = url.host else { return nil }
@@ -55,7 +58,7 @@ struct PortalHTTPResponse {
 }
 
 protocol PortalTransport {
-    func get(_ request: URLRequest, maxBytes: Int) async throws -> PortalHTTPResponse
+    func get(_ request: URLRequest, maxBytes: Int, allowPrefix: Bool) async throws -> PortalHTTPResponse
 }
 
 final class PortalHTTPClient: NSObject, PortalTransport, URLSessionTaskDelegate {
@@ -69,16 +72,20 @@ final class PortalHTTPClient: NSObject, PortalTransport, URLSessionTaskDelegate 
         configuration.timeoutIntervalForResource = 30
         return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }()
-    func get(_ request: URLRequest, maxBytes: Int) async throws -> PortalHTTPResponse {
+    func get(_ request: URLRequest, maxBytes: Int, allowPrefix: Bool) async throws -> PortalHTTPResponse {
         let deadline = Date().addingTimeInterval(request.timeoutInterval)
         let (bytes, response) = try await session.bytes(for: request)
+        defer { bytes.task.cancel() }
         guard let http = response as? HTTPURLResponse else { throw PortalError.invalidResponse("门户响应不是 HTTP 页面") }
-        if http.expectedContentLength > Int64(maxBytes) { throw PortalError.invalidResponse("文件超过大小限制") }
+        if !allowPrefix, http.expectedContentLength > Int64(maxBytes) { throw PortalError.invalidResponse("文件超过大小限制") }
         var data = Data()
         for try await byte in bytes {
             try Task.checkCancellation()
             if data.count & 4095 == 0, Date() >= deadline { throw URLError(.timedOut) }
-            guard data.count < maxBytes else { throw PortalError.invalidResponse("文件超过大小限制") }
+            if data.count >= maxBytes {
+                if allowPrefix { break }
+                throw PortalError.invalidResponse("文件超过大小限制")
+            }
             data.append(byte)
         }
         return PortalHTTPResponse(response: http, data: data)
@@ -94,13 +101,17 @@ final class PortalService: ObservableObject {
     @Published private(set) var activeAccount = ""
     @Published private(set) var sessionState: PortalSessionState = .signedOut
     @Published private(set) var storageMessage = ""
+    /// Merely selecting a username must not replace the root login view with cached-reader UI.
+    private(set) var canReadCachedAccount = false
     var profileID: String {
         guard hasAccount else { return "" }
         return SHA256.hash(data: Data(("bupt.edu.cn\u{0}" + activeAccount).utf8)).map { String(format: "%02x", $0) }.joined()
     }
     var hasAccount: Bool { !activeAccount.isEmpty }
     private(set) var generation: UInt64 = 0
-    let websiteDataStore = WKWebsiteDataStore.default()
+    // A new WebKit store is allocated on account changes. In-flight writes can only
+    // touch the discarded store; persistence is explicit and account-bound in Keychain.
+    private(set) var websiteDataStore = WKWebsiteDataStore.nonPersistent()
     private let transport: PortalTransport
     private var jar = PortalCookieJar()
     private var restored = false
@@ -125,6 +136,7 @@ final class PortalService: ObservableObject {
                 await websiteDataStore.httpCookieStore.setCookie(cookie)
             }
             guard owner == generation else { return }
+            canReadCachedAccount = true
             sessionState = .loginRequired // A saved cookie is not authentication proof.
         } catch {
             storageMessage = "本机登录信息暂时无法读取，请解锁后重试；缓存未删除。"
@@ -140,8 +152,11 @@ final class PortalService: ObservableObject {
         defer { switching = false }
         generation &+= 1
         let owner = generation
+        canReadCachedAccount = false
         jar = PortalCookieJar()
-        await clearWebData()
+        let previousWebStore = websiteDataStore
+        websiteDataStore = WKWebsiteDataStore.nonPersistent()
+        await clearWebData(previousWebStore)
         guard owner == generation else { throw PortalError.cancelled }
         activeAccount = account
         sessionState = .loginRequired
@@ -192,6 +207,7 @@ final class PortalService: ObservableObject {
             if let next { page = try PortalParser.parseMore(url: url, status: result.response.statusCode, xml: result.text, request: next) }
             else { page = try PortalParser.parseList(url: url, status: result.response.statusCode, html: result.text) }
             sessionState = .authenticated
+            canReadCachedAccount = true
             try saveSession()
             return page
         } catch { recordFailure(error, owner: owner); throw error }
@@ -221,10 +237,6 @@ final class PortalService: ObservableObject {
         do { result = try await request(url, jar: &cookies, maxBytes: maxBytes, expectedGeneration: owner, probe: false) }
         catch { recordFailure(error, owner: owner); throw error }
         guard owner == generation else { throw PortalError.cancelled }
-        // Merge changes; do not replace a newer concurrent response's cookies.
-        for cookie in cookies.received { jar.set(cookie) }
-        await copyCookiesToWeb(cookies.received, owner: owner)
-        guard owner == generation else { throw PortalError.cancelled }
         return result
     }
     private func recordFailure(_ error: Error, owner: UInt64) {
@@ -246,11 +258,19 @@ final class PortalService: ObservableObject {
             request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
             request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
             request.setValue(jar.header(for: current), forHTTPHeaderField: "Cookie")
-            let result = try await transport.get(request, maxBytes: maxBytes)
+            let result = try await transport.get(request, maxBytes: maxBytes, allowPrefix: probe)
             try Task.checkCancellation()
             guard expectedGeneration == generation else { throw PortalError.cancelled }
             guard result.response.url == current else { throw PortalError.invalidResponse("响应地址与当前请求不一致") }
             jar.receive(result.response)
+            if !probe {
+                // Keep response cookies even when the next hop requires interactive SSO.
+                // The callback may depend on the session created by this first portal request.
+                var updates = PortalCookieJar(); updates.receive(result.response)
+                for cookie in updates.received { self.jar.set(cookie) }
+                await copyCookiesToWeb(updates.received, owner: expectedGeneration)
+                guard expectedGeneration == generation else { throw PortalError.cancelled }
+            }
             let code = result.response.statusCode
             if [301,302,303,307,308].contains(code) {
                 guard let location = result.response.value(forHTTPHeaderField: "Location"), let next = URL(string: location, relativeTo: current)?.absoluteURL else { throw PortalError.invalidResponse("门户返回不完整跳转") }
@@ -290,6 +310,19 @@ final class PortalService: ObservableObject {
         guard saved.account == activeAccount, saved.binding == "https://auth.bupt.edu.cn/authserver/login" else { return nil }
         return saved
     }
+    var automaticRestoreAllowed: Bool {
+        guard hasAccount else { return false }
+        let defaults = UserDefaults.standard
+        return !defaults.bool(forKey: "portal-auto-paused:" + profileID) && defaults.double(forKey: "portal-auto-next:" + profileID) <= Date().timeIntervalSince1970
+    }
+    func noteAutomaticAttempt() {
+        guard hasAccount else { return }
+        UserDefaults.standard.set(Date().addingTimeInterval(300).timeIntervalSince1970, forKey: "portal-auto-next:" + profileID)
+    }
+    func pauseAutomaticRestore() {
+        guard hasAccount else { return }
+        UserDefaults.standard.set(true, forKey: "portal-auto-paused:" + profileID)
+    }
     func completeLogin(credential: PortalCredential?, remember: Bool, owner: UInt64) async throws {
         guard !verifying, owner == generation else { throw PortalError.cancelled }
         verifying = true
@@ -297,11 +330,17 @@ final class PortalService: ObservableObject {
         try await importWebCookies(owner: owner)
         _ = try await validateSession()
         guard owner == generation else { throw PortalError.cancelled }
+        UserDefaults.standard.removeObject(forKey: "portal-auto-paused:" + profileID)
+        UserDefaults.standard.removeObject(forKey: "portal-auto-next:" + profileID)
         if let credential, credential.account == activeAccount {
             do {
                 if remember { try KeychainStore.write(JSONEncoder().encode(credential), key: "portal-password:" + profileID) }
                 else { try forgetSavedPassword() }
             } catch { storageMessage = "登录成功，但系统未能保存密码。下次可能需要重新输入。" }
+        } else {
+            // A manually corrected password cannot authorize retaining an earlier failed secret.
+            do { try forgetSavedPassword() }
+            catch { pauseAutomaticRestore(); storageMessage = "网页登录成功；旧密码清理未完成，自动登录已暂停。" }
         }
     }
     func forgetSavedPassword() throws { try KeychainStore.delete("portal-password:" + profileID) }
@@ -309,6 +348,7 @@ final class PortalService: ObservableObject {
         // A failed/locked keychain deletion must never silently restore a logged-out session.
         UserDefaults.standard.set(true, forKey: "portal-logout-pending")
         generation &+= 1
+        canReadCachedAccount = false
         jar = PortalCookieJar()
         do { try forgetSavedPassword() }
         catch { storageMessage = "系统密码清理未完成，请解锁后重试。" }
@@ -316,10 +356,12 @@ final class PortalService: ObservableObject {
         catch { storageMessage = "系统登录记录清理未完成，请解锁后重试。" }
         activeAccount = ""
         sessionState = .signedOut
-        await clearWebData()
+        let previousWebStore = websiteDataStore
+        websiteDataStore = WKWebsiteDataStore.nonPersistent()
+        await clearWebData(previousWebStore)
     }
-    private func clearWebData() async {
-        await websiteDataStore.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+    private func clearWebData(_ store: WKWebsiteDataStore) async {
+        await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
     }
     private func validAccount(_ input: String) -> Bool {
         !input.isEmpty && input.count <= 128 && !input.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })

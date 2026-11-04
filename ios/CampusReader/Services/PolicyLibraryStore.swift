@@ -2,7 +2,7 @@ import Foundation
 import PDFKit
 import CampusReaderCore
 
-struct LocalPolicy: Codable, Identifiable {
+struct LocalPolicy: Codable, Identifiable, Sendable {
     var id: String
     var title: String
     var publisher: String
@@ -16,10 +16,11 @@ struct LocalPolicy: Codable, Identifiable {
     @Published private(set) var error: String?
     private var profile = ""
     private var writable = false
+    private var searchCache: [String: [PolicyPassage]] = [:]
     var onChange: (() -> Void)?
 
     func activate(profile: String) {
-        self.profile = profile; documents = []; writable = false; error = nil
+        self.profile = profile; documents = []; searchCache = [:]; writable = false; error = nil
         do {
             documents = try AppFiles.read([LocalPolicy].self, from: fileURL()) ?? []
             writable = true
@@ -52,24 +53,37 @@ struct LocalPolicy: Codable, Identifiable {
         guard owner == profile else { throw PortalError.cancelled }
         var next = documents
         next.append(LocalPolicy(id: UUID().uuidString, title: String(url.deletingPathExtension().lastPathComponent.prefix(120)), publisher: String(publisher.prefix(120)), version: String(version.prefix(80)), importedAt: Date(), pages: pages))
-        try AppFiles.write(next, to: fileURL()); documents = next; onChange?()
+        try AppFiles.write(next, to: fileURL()); documents = next; searchCache = [:]; onChange?()
     }
     func remove(_ id: String) throws {
         guard writable else { throw PortalError.invalidResponse("资料库暂不可写") }
-        let next = documents.filter { $0.id != id }; try AppFiles.write(next, to: fileURL()); documents = next; onChange?()
+        let next = documents.filter { $0.id != id }; try AppFiles.write(next, to: fileURL()); documents = next; searchCache = [:]; onChange?()
     }
-    func passages(for notice: Notice) -> [PolicyPassage] {
+    func passages(for notice: Notice) async -> [PolicyPassage] {
+        let key = notice.id + notice.bodyVersion, owner = profile, snapshot = documents
+        if let result = searchCache[key] { return result }
+        let result = await Task.detached(priority: .utility) { Self.search(notice, documents: snapshot) }.value
+        guard owner == profile, snapshot.map(\.id) == documents.map(\.id), !Task.isCancelled else { return [] }
+        if searchCache.count >= 30 { searchCache.removeAll() }
+        searchCache[key] = result; return result
+    }
+    private nonisolated static func search(_ notice: Notice, documents: [LocalPolicy]) -> [PolicyPassage] {
+        guard !documents.isEmpty else { return [] }
         let normalized = (notice.title + " " + String(notice.bodyText.prefix(2_000))).lowercased()
-        let words = normalized.split(whereSeparator: { $0.isWhitespace || $0.isPunctuation }).map(String.init).filter { $0.count > 1 }
-        let chars = Array(normalized); var tokens = Set(words)
-        if chars.count >= 2 { for i in 0..<(chars.count - 1) where !chars[i].isWhitespace && !chars[i + 1].isWhitespace { tokens.insert(String(chars[i...i + 1])) } }
+        let words = normalized.split(whereSeparator: { $0.isWhitespace || $0.isPunctuation }).map(String.init).filter { $0.count > 1 && $0.count < 30 }
+        let chars = Array(normalized); var tokens = Array(Set(words)).sorted().prefix(24).map { $0 }
+        if chars.count >= 2 { for i in 0..<(chars.count - 1) where tokens.count < 64 && !chars[i].isWhitespace && !chars[i + 1].isWhitespace {
+            let token = String(chars[i...i + 1]); if !tokens.contains(token) { tokens.append(token) }
+        } }
         var ranked: [(Int, PolicyPassage)] = []
         for (di, document) in documents.enumerated() {
             for (pi, page) in document.pages.enumerated() {
+                if Task.isCancelled { return [] }
                 let text = page.trimmingCharacters(in: .whitespacesAndNewlines); let chars = Array(text)
                 for start in stride(from: 0, to: chars.count, by: 650) {
                     let part = String(chars[start..<min(start + 800, chars.count)])
-                    let score = tokens.reduce(0) { $0 + (part.lowercased().contains($1) ? 1 : 0) }
+                    let lower = part.lowercased()
+                    let score = tokens.reduce(0) { $0 + (lower.contains($1) ? 1 : 0) }
                     if score > 1 {
                         let location = "第 \(pi + 1) 页，第 \(start / 650 + 1) 段；\(document.publisher) \(document.version)"
                         ranked.append((score, PolicyPassage(id: "P\(di + 1)_\(pi + 1)_\(start / 650 + 1)", documentTitle: document.title, location: location, text: part)))

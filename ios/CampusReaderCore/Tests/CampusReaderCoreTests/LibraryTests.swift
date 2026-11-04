@@ -35,6 +35,15 @@ final class LibraryTests: XCTestCase {
         library.enforceRetention(policy:RetentionPolicy(maximumBodies:1))
         XCTAssertEqual(library.notices.filter(\.hasBody).count,1);XCTAssertTrue(library.notices.allSatisfy(\.later))
     }
+    func testDisabledAgeCleanupKeepsOldReadBodiesButStillHonorsCapacity() {
+        var library=LibraryState();let now=Date(timeIntervalSince1970:200_000)
+        library.merge([notice("n:1"),notice("n:2")]);library.markRead(id:"n:1",read:true,now:Date(timeIntervalSince1970:0))
+        library.enforceRetention(policy:RetentionPolicy(readBodyHours:-1),now:now)
+        XCTAssertTrue(library.notices.first(where:{$0.id=="n:1"})!.hasBody)
+        library.enforceRetention(policy:RetentionPolicy(maximumBodies:1,readBodyHours:-1),now:now)
+        XCTAssertEqual(library.notices.filter(\.hasBody).count,1)
+        XCTAssertTrue(library.stateLedger["n:1"]!.isRead)
+    }
     func testEvictedMetadataReturnsWithPreviousStateAndNotNewIdentity() {
         var library=LibraryState();library.merge([notice("n:1",date:Date(timeIntervalSince1970:10)),notice("n:2",date:Date(timeIntervalSince1970:20))])
         library.markRead(id:"n:1",read:true);library.enforceRetention(policy:RetentionPolicy(maximumMetadata:1))

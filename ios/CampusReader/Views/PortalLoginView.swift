@@ -5,6 +5,7 @@ import CampusReaderCore
 struct PortalLoginView: View {
     @ObservedObject var service: PortalService
     let onAuthenticated: () -> Void
+    var automaticallyRestore = true
     @State private var account = ""
     @State private var password = ""
     @State private var remember = true
@@ -36,7 +37,7 @@ struct PortalLoginView: View {
         .task {
             guard !attemptedRestore else { return }; attemptedRestore = true
             await service.restore(); account = service.activeAccount
-            if service.hasAccount { await begin(automatic: true) }
+            if service.hasAccount && automaticallyRestore { await begin(automatic: true) }
         }
         .sheet(item: $launch) { item in
             PortalWebLogin(service: service, launch: item) {
@@ -71,12 +72,14 @@ struct PortalLoginView: View {
                 return
             }
             var credential: PortalCredential?
+            if automatic && !service.automaticRestoreAllowed { message = "自动登录已暂停或正在冷却，请检查密码后手动登录。"; return }
             if !password.isEmpty {
                 guard password.count <= 1024 else { message = "密码过长，请检查输入"; password = ""; return }
                 credential = PortalCredential(account: service.activeAccount, password: password, binding: "https://auth.bupt.edu.cn/authserver/login")
             } else { credential = try service.savedCredential() }
             password = ""
             if automatic && credential == nil { message = "门户需要重新登录，请输入密码。"; return }
+            if automatic { service.noteAutomaticAttempt() }
             launch = PortalWebLaunch(credential: credential, remember: remember, owner: service.generation)
         } catch {
             password = ""
@@ -123,6 +126,8 @@ private struct PortalAuthenticationWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = service.websiteDataStore
+        configuration.userContentController.add(context.coordinator, name: "portalUserEdited")
+        configuration.userContentController.addUserScript(WKUserScript(source: "['input','click'].forEach(function(type){document.addEventListener(type,function(e){if(e.isTrusted)window.webkit.messageHandlers.portalUserEdited.postMessage(true)},true)})", injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let web = WKWebView(frame: .zero, configuration: configuration)
         web.customUserAgent = PortalConfiguration.userAgent
         web.navigationDelegate = context.coordinator
@@ -138,10 +143,11 @@ private struct PortalAuthenticationWebView: UIViewRepresentable {
     }
     static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) {
         coordinator.closed = true; coordinator.credential = nil; coordinator.task?.cancel(); view.stopLoading(); view.navigationDelegate = nil
+        view.configuration.userContentController.removeScriptMessageHandler(forName: "portalUserEdited")
         // The school page holds the password only during its normal foreground login lifecycle.
         view.loadHTMLString("", baseURL: nil)
     }
-    @MainActor final class Coordinator: NSObject, WKNavigationDelegate {
+    @MainActor final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var parent: PortalAuthenticationWebView
         weak var web: WKWebView?
         var credential: PortalCredential?
@@ -150,6 +156,11 @@ private struct PortalAuthenticationWebView: UIViewRepresentable {
         var task: Task<Void, Never>?
         init(_ parent: PortalAuthenticationWebView) { self.parent = parent; credential = parent.launch.credential }
         private var live: Bool { !closed && parent.launch.owner == parent.service.generation }
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            // A manual edit cannot authorize saving the earlier native password. The bridge
+            // only revokes pending credentials; it never receives field values or cookies.
+            if live, message.name == "portalUserEdited", message.frameInfo.isMainFrame { credential = nil }
+        }
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             guard live, let url = navigationAction.request.url, PortalConfiguration.web(url), navigationAction.targetFrame != nil else {
                 parent.status = "已停止未知地址跳转，请返回后重试。"; decisionHandler(.cancel); return
@@ -169,13 +180,13 @@ private struct PortalAuthenticationWebView: UIViewRepresentable {
                     let result = try await webView.callAsyncJavaScript(PortalFormPolicy.probe, arguments: [:], in: nil, contentWorld: .page)
                     guard self.live, let form = result as? [String: Any], let page = form["page"] as? String,
                           let action = form["action"] as? String, PortalFormPolicy.accepts(form), webView.url?.absoluteString == page else {
-                        self.credential = nil; self.parent.status = "此认证页面暂不支持自动填写。请返回后重试，或按学校提示完成验证。"; return
+                        self.credential = nil; self.parent.service.pauseAutomaticRestore(); self.parent.status = "此认证页面暂不支持自动填写。请返回后重试，或按学校提示完成验证。"; return
                     }
                     // Keep the selected account fixed while allowing password/captcha input.
                     _ = try await webView.callAsyncJavaScript(PortalFormPolicy.bindAccount, arguments: ["account": self.parent.service.activeAccount], in: nil, contentWorld: .page)
                     guard self.live else { return }
                     if (form["challenge"] as? Bool == true) || (form["error"] as? Bool == true) || self.submitted {
-                        self.credential = nil; self.parent.status = "请在学校页面完成验证码或更正密码；本次手动输入不会保存。"; return
+                        self.credential = nil; self.parent.service.pauseAutomaticRestore(); self.parent.status = "请在学校页面完成验证码或更正密码；本次手动输入不会保存。"; return
                     }
                     guard let credential = self.credential else { self.parent.status = "请在学校网页输入密码并登录。切换学工号请返回。"; return }
                     self.submitted = true
