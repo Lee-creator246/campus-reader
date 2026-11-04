@@ -38,6 +38,14 @@ public final class PortalAccess {
     public static String currentProfile(){return currentProfile(context());}
     public static String account(){return account(context());}
     public static String loginUrl(){return org.campusreader.config.BuptPreset.matches(CampusSite.requireConfigured())?org.campusreader.config.BuptPreset.LOGIN:CampusSite.loginUrl();}
+    /** Keep the saved account/cache scope while resolving the portal home to its notice feed. */
+    public static String noticeListUrl(){
+        String configured=CampusSite.portalListUrl();
+        java.net.URI uri=java.net.URI.create(configured);
+        if(org.campusreader.config.BuptPreset.matches(CampusSite.requireConfigured())&&"/xs_index.jsp".equals(uri.getPath()))
+            return uri.resolve("/list.jsp?urltype=tree.TreeTempUrl&wbtreeid=1154").toString();
+        return configured;
+    }
     public static long revision(){return revision.get();}
     public static synchronized void invalidate(){route=Route.UNKNOWN;checkedAt=0;selectedNetwork=null;revision.incrementAndGet();}
     public static String problem(){return problem;}
@@ -87,7 +95,7 @@ public final class PortalAccess {
             });
         });
     }
-    /** Bounded anonymous reachability probe. No password, session Cookie or SDK calls. */
+    /** Bounded anonymous reachability probe. No password, saved session Cookie or SDK calls. */
     public static Route probe(Context c){
         if(Looper.myLooper()==Looper.getMainLooper())throw new IllegalStateException("Reachability requires worker thread");
         long probeId=probeSequence.incrementAndGet(),startRevision=revision.get();String startScope=CampusSite.scopeId();
@@ -111,18 +119,35 @@ public final class PortalAccess {
         return result;
     }
     private static Route probeNetwork(Network n){
+        return probeAnonymous(url->(HttpURLConnection)(n==null?url.openConnection():n.openConnection(url)));
+    }
+    interface ProbeConnectionFactory { HttpURLConnection open(URL url)throws java.io.IOException; }
+    /** A separate, ephemeral cookie jar for each network attempt, never shared with WebView. */
+    static Route probeAnonymous(ProbeConnectionFactory connections){
         URL current;
         try{current=new URL(CampusSite.portalListUrl());}catch(Exception invalid){problem="配置地址不可用";return Route.UNKNOWN;}
+        java.net.CookieManager anonymousCookies=new java.net.CookieManager(null,java.net.CookiePolicy.ACCEPT_ORIGINAL_SERVER);
         long deadline=SystemClock.elapsedRealtime()+12_000L;
         try{
             for(int redirects=0;redirects<4;redirects++){
                 if(SystemClock.elapsedRealtime()>=deadline)throw new java.net.SocketTimeoutException();
                 if(Thread.currentThread().isInterrupted())return Route.UNKNOWN;
-                HttpURLConnection connection=(HttpURLConnection)(n==null?current.openConnection():n.openConnection(current));
+                // Only the configured portal host is contacted. A known SSO redirect proves
+                // reachability below without contacting it or forwarding the probe cookies.
+                if(!CampusSite.allowsPortalUrl(current.toString())){problem="门户返回未知认证地址";return Route.UNKNOWN;}
+                java.net.URI origin=java.net.URI.create(current.toString());
+                HttpURLConnection connection=connections.open(current);
                 try{
                     connection.setConnectTimeout(4500);connection.setReadTimeout(4500);connection.setInstanceFollowRedirects(false);
                     connection.setUseCaches(false);connection.setRequestProperty("User-Agent",ReaderHttp.USER_AGENT);
+                    for(java.util.Map.Entry<String,java.util.List<String>> header:anonymousCookies.get(origin,java.util.Collections.emptyMap()).entrySet()){
+                        if("Cookie".equalsIgnoreCase(header.getKey())&&!header.getValue().isEmpty())
+                            connection.setRequestProperty("Cookie",android.text.TextUtils.join("; ",header.getValue()));
+                    }
                     int code=connection.getResponseCode();
+                    // The portal's anonymous /clogin.jsp redirect requires its temporary
+                    // JSESSIONID; dropping it produces an unrecognizable HTTP 200 page.
+                    anonymousCookies.put(origin,connection.getHeaderFields());
                     if(code>=500){problem="门户服务暂时异常";return Route.UNKNOWN;}
                     if(code==401||code==403){problem="门户需要登录或访问权限";return Route.DIRECT;}
                     if(code>=300&&code<400){

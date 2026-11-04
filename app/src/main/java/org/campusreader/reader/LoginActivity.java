@@ -61,7 +61,7 @@ public final class LoginActivity extends Activity {
         worker.execute(()->{
             PortalAccess.Route route=PortalAccess.probe(this);boolean session=false;String profile=PortalAccess.currentProfile(this);
             if((route==PortalAccess.Route.DIRECT||route==PortalAccess.Route.VPN)&&!profile.equals("local"))try{
-                ReaderHttp.Response response=ReaderHttp.get(CampusSite.portalListUrl(),5*1024*1024,true,()->closed||generation!=token);
+                ReaderHttp.Response response=ReaderHttp.get(PortalAccess.noticeListUrl(),5*1024*1024,true,()->closed||generation!=token);
                 new CampusPortalParser().parseList(response.url,response.status,response.text());session=true;
             }catch(Exception ignored){}
             final boolean logged=session;

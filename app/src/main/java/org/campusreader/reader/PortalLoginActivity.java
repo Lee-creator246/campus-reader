@@ -148,7 +148,7 @@ public class PortalLoginActivity extends Activity {
     }
     private void verify(boolean explicit){
         if(!live()||checking)return;checking=true;final long requestAttempt=attempt;
-        worker.execute(()->{boolean success=false,network=false;try{ReaderHttp.Response r=ReaderHttp.get(CampusSite.portalListUrl(),5*1024*1024,true,()->cancelled.get()||prefs.getPortalGeneration()!=generation||attempt!=requestAttempt);new CampusPortalParser().parseList(r.url,r.status,r.text());success=true;}catch(Exception error){network=isTransportFailure(error);}final boolean valid=success,networkFailed=network;
+        worker.execute(()->{boolean success=false,network=false;try{ReaderHttp.Response r=ReaderHttp.get(PortalAccess.noticeListUrl(),5*1024*1024,true,()->cancelled.get()||prefs.getPortalGeneration()!=generation||attempt!=requestAttempt);new CampusPortalParser().parseList(r.url,r.status,r.text());success=true;}catch(Exception error){network=isTransportFailure(error);}final boolean valid=success,networkFailed=network;
             runOnUiThread(()->{checking=false;if(!live()||requestAttempt!=attempt)return;if(!valid){if(networkFailed&&!CampusApplication.auth().isAccessReady()){networkUnavailable();return;}if(explicit)setStatus("门户尚未验证通过，请先完成学校网页登录。");else probe();return;}
                 if(!prefs.markPortalSessionIfCurrent(profile,generation))return;
                 CookieManager.getInstance().flush();CampusApplication.auth().clearPortalAuthenticationRequired();PortalSessionCoordinator.success(this,profile);

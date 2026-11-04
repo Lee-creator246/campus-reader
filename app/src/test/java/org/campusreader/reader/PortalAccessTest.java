@@ -107,4 +107,21 @@ public class PortalAccessTest {
         PortalLoginLaunch.put("campus:one","student-one","synthetic-secret",true);
         assertEquals("synthetic-secret",PortalLoginLaunch.take("campus:one").password);assertNull(PortalLoginLaunch.take("campus:one"));
     }
+    @Test public void portalHomeResolvesToVerifiedMobileFeedWithoutChangingCacheScope(){
+        CampusSite.install(BuptPreset.profile());String scope=CampusSite.scopeId();
+        assertEquals("http://my.bupt.edu.cn/list.jsp?urltype=tree.TreeTempUrl&wbtreeid=1154",PortalAccess.noticeListUrl());
+        assertEquals(BuptPreset.LIST,CampusSite.portalListUrl());assertEquals(scope,CampusSite.scopeId());
+    }
+    @Test public void existingMobileFeedKeepsItsAddressAndAccountScope(){
+        String list="https://my.bupt.edu.cn/list.jsp?urltype=tree.TreeTempUrl&wbtreeid=1154";
+        CampusSite.install(CampusSite.create(BuptPreset.DOMAIN,BuptPreset.VPN,list,BuptPreset.LOGIN));String scope=CampusSite.scopeId();
+        assertEquals(list,PortalAccess.noticeListUrl());assertEquals(scope,CampusSite.scopeId());
+    }
+    @Test public void homeResolutionPreservesHttpsAndDoesNotRewriteOtherCampusPages(){
+        CampusSite.install(CampusSite.create(BuptPreset.DOMAIN,BuptPreset.VPN,BuptPreset.LIST.replace("http:","https:"),BuptPreset.LOGIN));
+        assertTrue(PortalAccess.noticeListUrl().startsWith("https://my.bupt.edu.cn/list.jsp?"));
+        String list="https://portal.campus.example.edu/xs_index.jsp?wbtreeid=1000";
+        CampusSite.install(CampusSite.create("campus.example.edu","https://vpn.campus.example.edu",list,"https://auth.campus.example.edu/login"));
+        assertEquals(list,PortalAccess.noticeListUrl());
+    }
 }

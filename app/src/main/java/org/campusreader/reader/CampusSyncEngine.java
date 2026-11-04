@@ -72,7 +72,7 @@ public final class CampusSyncEngine {
             store.enforceRetention(System.currentTimeMillis());
             Status guard=check(profile,generation,prefs,cancel,deadline);
             if(guard!=null)return result(guard,profile,0,0,0,0,request);
-            String cookie=CookieManager.getInstance().getCookie(CampusSite.portalListUrl());
+            String cookie=CookieManager.getInstance().getCookie(PortalAccess.noticeListUrl());
             if((background&&!profile.equals(prefs.getPortalProfile()))||cookie==null||cookie.trim().isEmpty()){
                 store.setConnectionState(CampusPortalParser.SOURCE,CampusNoticeStore.ConnectionState.REAUTH_REQUIRED);
                 signalPortal(context,profile,generation,true);
@@ -80,7 +80,7 @@ public final class CampusSyncEngine {
             }
             CampusPortalParser parser=new CampusPortalParser();
             try {
-                ReaderHttp.Response response=ReaderHttp.get(request==null?CampusSite.portalListUrl():request.url(),5*1024*1024,true,()->check(profile,generation,prefs,cancel,deadline)!=null);
+                ReaderHttp.Response response=ReaderHttp.get(request==null?PortalAccess.noticeListUrl():request.url(),5*1024*1024,true,()->check(profile,generation,prefs,cancel,deadline)!=null);
                 guard=check(profile,generation,prefs,cancel,deadline);
                 if(guard!=null)return result(guard,profile,0,0,0,0,request);
                 CampusPortalParser.Page page=request==null?parser.parseList(response.url,response.status,response.text()):parser.parseMore(response.url,response.status,response.text(),request);
