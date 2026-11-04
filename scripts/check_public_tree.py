@@ -3,10 +3,10 @@ from pathlib import Path
 import os,re,subprocess,sys,hashlib
 ROOT=Path(__file__).resolve().parents[1]
 ROOT_FILES={'settings.gradle','build.gradle','gradle.properties','gradlew','gradlew.bat','LICENSE','README.md','BUILDING.md','THIRD_PARTY_NOTICES.md','CONTRIBUTING.md','SECURITY.md','CHANGELOG.md','.gitignore','.gitattributes','.editorconfig','SOURCE_MANIFEST.json'}
-DIRS={'campus-config','app','campus-auth','campus-extension','campus-portal','checks','gradle','docs','scripts','licenses','vendor','.github'}
-GENERATED={'build','.gradle','.git','dist','__pycache__'}
+DIRS={'campus-config','app','campus-auth','campus-extension','campus-portal','checks','gradle','docs','scripts','licenses','vendor','.github','ios'}
+GENERATED={'build','.gradle','.git','dist','__pycache__','.build','DerivedData','xcuserdata','CampusReader.xcodeproj'}
 WRAPPER='gradle/wrapper/gradle-wrapper.jar'
-DENIED_EXT={'.apk','.aab','.xapk','.aar','.so','.dex','.zip','.jks','.keystore','.key','.pem','.p12','.pfx','.db','.sqlite','.sqlite3','.png','.jpg','.jpeg','.log','.pyc'}
+DENIED_EXT={'.apk','.aab','.xapk','.aar','.so','.dex','.zip','.jks','.keystore','.key','.pem','.p12','.pfx','.db','.sqlite','.sqlite3','.png','.jpg','.jpeg','.log','.pyc','.ipa','.mobileprovision','.provisionprofile'}
 PATTERNS=[
     ('private key',re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----')),
     ('GitHub token',re.compile(r'\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})\b')),
@@ -26,7 +26,7 @@ def public_files():
             children[:]=[d for d in children if d not in GENERATED and not (name=='vendor' and d=='sangfor')]
             for d in children:
                 if (base/d).is_symlink():raise ValueError('Symlink directory: '+str((base/d).relative_to(ROOT)))
-            files.extend(base/n for n in names)
+            files.extend(base/n for n in names if (base/n).relative_to(ROOT).as_posix()!='ios/CampusReader/Assets.xcassets/AppIcon.appiconset/AppIcon.png')
     return sorted(files)
 def validate(files,staged=None):
     errors=[]

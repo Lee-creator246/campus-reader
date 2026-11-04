@@ -1,0 +1,66 @@
+name: CampusReader
+options:
+  minimumXcodeGenVersion: 2.42.0
+  deploymentTarget:
+    iOS: '16.0'
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    IPHONEOS_DEPLOYMENT_TARGET: '16.0'
+    MARKETING_VERSION: '0.9.1'
+    CURRENT_PROJECT_VERSION: '1'
+    DEVELOPMENT_TEAM: ''
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+packages:
+  CampusReaderCore:
+    path: CampusReaderCore
+targets:
+  CampusReader:
+    type: application
+    platform: iOS
+    sources:
+      - path: CampusReader
+        excludes: ['Info.plist']
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.campusreader.ios
+        PRODUCT_NAME: CampusReader
+        TARGETED_DEVICE_FAMILY: '1,2'
+        INFOPLIST_FILE: CampusReader/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SUPPORTS_MACCATALYST: NO
+    dependencies:
+      - package: CampusReaderCore
+  CampusReaderTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [CampusReaderTests]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.campusreader.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: CampusReader
+      - package: CampusReaderCore
+  CampusReaderUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [CampusReaderUITests]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.campusreader.ios.uitests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: CampusReader
+schemes:
+  CampusReader:
+    build:
+      targets:
+        CampusReader: all
+    test:
+      targets: [CampusReaderTests, CampusReaderUITests]
+      gatherCoverageData: true
+    archive:
+      config: Release

@@ -38,3 +38,13 @@ __pycache__/
 Thumbs.db
 
 campus.local.properties
+**/.build/
+**/DerivedData/
+**/xcuserdata/
+*.xcuserstate
+*.mobileprovision
+*.provisionprofile
+*.ipa
+*.xcarchive/
+ios/CampusReader.xcodeproj/
+ios/CampusReader/Assets.xcassets/AppIcon.appiconset/AppIcon.png

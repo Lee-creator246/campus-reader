@@ -1,0 +1,62 @@
+name: iOS build and regression tests
+on:
+  push:
+    branches: [main]
+    paths: ['ios/**', '.github/workflows/ios.yml', 'scripts/check_public_tree.py']
+  pull_request:
+    paths: ['ios/**', '.github/workflows/ios.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Toolchain and source boundary
+        run: |
+          xcodebuild -version
+          swift --version
+          python3 scripts/check_public_tree.py --tracked
+          brew install xcodegen
+          xcodegen --version
+      - name: Core regression tests
+        run: swift test --package-path ios/CampusReaderCore
+      - name: Build unsigned iPhone application
+        run: bash ios/scripts/build.sh
+      - name: Simulator integration and UI tests
+        run: |
+          python3 ios/scripts/select_simulator.py > /tmp/campus-simulator-id
+          DEVICE=$(cat /tmp/campus-simulator-id)
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcodebuild -project ios/CampusReader.xcodeproj -scheme CampusReader -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath ios/build/simulator -resultBundlePath ios/build/Tests.xcresult CODE_SIGNING_ALLOWED=NO test
+      - name: Package build evidence
+        if: always()
+        run: |
+          mkdir -p ios/build/delivery
+          if [ -d ios/build/device/Build/Products/Release-iphoneos/CampusReader.app ]; then
+            ditto -c -k --sequesterRsrc --keepParent ios/build/device/Build/Products/Release-iphoneos/CampusReader.app ios/build/delivery/CampusReader-iOS-unsigned.app.zip
+          fi
+          if [ -d ios/build/simulator/Build/Products/Debug-iphonesimulator/CampusReader.app ]; then
+            ditto -c -k --sequesterRsrc --keepParent ios/build/simulator/Build/Products/Debug-iphonesimulator/CampusReader.app ios/build/delivery/CampusReader-iOS-simulator.app.zip
+          fi
+          if [ -d ios/CampusReader.xcodeproj ]; then
+            ditto -c -k --keepParent ios/CampusReader.xcodeproj ios/build/delivery/CampusReader.xcodeproj.zip
+          fi
+          echo 'Unsigned build evidence; not an installable IPA. No Apple signing secrets or campus credentials were used.' > ios/build/delivery/BUILD-STATUS.txt
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: ios-build-evidence
+          path: |
+            ios/build/delivery/
+            ios/build/Tests.xcresult/
+            ios/CampusReaderCore/Package.resolved
+          retention-days: 14
