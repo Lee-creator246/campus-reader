@@ -1,4 +1,5 @@
 package org.campusreader.reader;
+import org.campusreader.auth.ScreenPrivacy;
 
 import android.app.*;
 import android.content.Intent;
@@ -20,7 +21,7 @@ public final class InterestsActivity extends Activity {
     private final java.util.concurrent.ExecutorService worker=java.util.concurrent.Executors.newSingleThreadExecutor();
     @Override public void onCreate(Bundle state){
         super.onCreate(state);profile=getIntent().getStringExtra(EXTRA_PROFILE);if(!NotificationHistory.validProfile(profile)||!current()){finish();return;}
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);getWindow().setStatusBarColor(ReaderUi.SURFACE);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        ScreenPrivacy.protect(getWindow());getWindow().setStatusBarColor(ReaderUi.SURFACE);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         LinearLayout root=column();root.setBackgroundColor(ReaderUi.SURFACE);setContentView(root);
         LinearLayout bar=new LinearLayout(this);bar.setPadding(dp(12),dp(8),dp(12),dp(8));bar.setGravity(Gravity.CENTER_VERTICAL);root.addView(bar);
         Button back=button("返回",()->finish());bar.addView(back);TextView title=ReaderUi.text(this,"关注偏好",23,ReaderUi.INK);bar.addView(title,new LinearLayout.LayoutParams(0,-2,1));

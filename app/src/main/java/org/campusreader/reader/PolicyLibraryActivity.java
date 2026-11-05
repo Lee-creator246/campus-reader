@@ -1,4 +1,5 @@
 package org.campusreader.reader;
+import org.campusreader.auth.ScreenPrivacy;
 
 import android.app.*;
 import android.content.*;
@@ -44,7 +45,7 @@ public final class PolicyLibraryActivity extends Activity {
         main.postDelayed(this,500);
     }};
     @Override protected void onCreate(Bundle state){
-        super.onCreate(state);getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        super.onCreate(state);ScreenPrivacy.protect(getWindow());
         profile=getIntent().getStringExtra(EXTRA_PROFILE);if(!AiProfile.owns(this,profile)){finish();return;}
         library=new PolicyLibrary(this,profile);
         LinearLayout page=column();page.setPadding(dp(20),dp(16),dp(20),dp(24));page.setBackgroundColor(Color.WHITE);
@@ -135,7 +136,7 @@ public final class PolicyLibraryActivity extends Activity {
     private void show(AlertDialog dialog){dialog.setOnShowListener(v->secure(dialog));trackDialog(dialog);dialog.show();}
     private void trackDialog(AlertDialog dialog){dismissDialog();openDialog=dialog;dialog.setOnDismissListener(v->{if(openDialog==dialog)openDialog=null;});}
     private void dismissDialog(){AlertDialog previous=openDialog;openDialog=null;if(previous!=null)previous.dismiss();}
-    private void secure(AlertDialog dialog){if(dialog.getWindow()!=null){dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);dialog.getWindow().setLayout(-1,(int)(getResources().getDisplayMetrics().heightPixels*.85));}}
+    private void secure(AlertDialog dialog){if(dialog.getWindow()!=null){ScreenPrivacy.protect(dialog.getWindow());dialog.getWindow().setLayout(-1,(int)(getResources().getDisplayMetrics().heightPixels*.85));}}
     private LinearLayout column(){LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);return layout;}
     private EditText field(LinearLayout page,String label,String value,int max){note(page,label,13,ReaderUi.INK);EditText text=new EditText(this);text.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);text.setTextSize(14);text.setMinHeight(dp(48));text.setSingleLine(true);text.setSaveEnabled(false);if(android.os.Build.VERSION.SDK_INT>=26)text.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);text.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(max)});text.setText(value);page.addView(text);return text;}
     private TextView note(LinearLayout page,String value,int size,int color){TextView view=ReaderUi.text(this,value,size,color);view.setPadding(0,dp(8),0,dp(8));view.setLineSpacing(dp(3),1);page.addView(view);return view;}

@@ -42,6 +42,14 @@ Windows 使用 `gradlew.bat`。核心检查使用合成数据，不登录学校�
 
 Windows 上若发生 HotSpot C2 编译器崩溃，可临时添加 `"-Dorg.gradle.jvmargs=-Xmx3g -XX:TieredStopAtLevel=1 -Dfile.encoding=UTF-8"`，不跳过 Lint 或测试。
 
+### 个人截图测试版
+
+`:app:assemblePersonal` 生成 `app/build/outputs/apk/personal/app-personal-unsigned.apk`，使用上节的私有密钥签名流程安装。应用名称为“北邮人信息·个人截图”，应用 ID 为 `org.campusreader.reader.personal`，可以与普通版并存，需要单独登录和填写 AI 配置。
+
+个人构建通过编译资源开放页面与弹窗截图。普通 Debug / Release 构建默认启用敏感窗口保护。此选项没有运行时开关，截图范围包含个人版的登录和密钥设置页面。
+
+运行 `:app:testDebugUnitTest` 和 `:app:testPersonalUnitTest` 可分别检查两个构建的截图策略。
+
 ## 本版接入方式
 
 `BuptPreset` 包含公开服务地址，产品启动不再显示学校目录、配置导入或其他学校选择：

@@ -70,7 +70,7 @@ public class PolicyLibraryActivityTest {
             PolicyLibraryActivity activity=controller.get();activity.onActivityResult(421,Activity.RESULT_OK,new Intent().setData(Uri.parse("content://synthetic-policy-provider/document")));
             Future<?> pending=ReflectionHelpers.getField(activity,"task");assertTrue(opened.await(2,TimeUnit.SECONDS));controller.resume().visible();release.countDown();pending.get(5,TimeUnit.SECONDS);shadowOf(Looper.getMainLooper()).idle();
             AlertDialog dialog=ShadowAlertDialog.getLatestAlertDialog();assertNotNull(dialog);assertTrue(dialog.isShowing());assertEquals("核对并添加政策",shadowOf(dialog).getTitle());
-            assertTrue((dialog.getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_SECURE)!=0);
+            assertEquals(!Boolean.getBoolean("campus.captureAllowed"), (dialog.getWindow().getAttributes().flags&WindowManager.LayoutParams.FLAG_SECURE)!=0);
             assertEquals(0,new PolicyLibrary(app,"local").snapshot().documents.size());assertEquals(0,new AiSettings(app,"local").usedToday());
             dialog.dismiss();
         }finally{release.countDown();controller.pause().stop().destroy();source.delete();app.dispose();}

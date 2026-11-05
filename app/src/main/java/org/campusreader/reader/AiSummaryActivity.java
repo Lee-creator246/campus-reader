@@ -1,4 +1,5 @@
 package org.campusreader.reader;
+import org.campusreader.auth.ScreenPrivacy;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -71,7 +72,7 @@ public final class AiSummaryActivity extends Activity {
     }};
 
     @Override public void onCreate(Bundle state){
-        super.onCreate(state);getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        super.onCreate(state);ScreenPrivacy.protect(getWindow());
         interruptedByLeaving=state!=null&&state.getBoolean("ai_interrupted",false);
         profile=getIntent().getStringExtra(EXTRA_PROFILE);
         if(!AiProfile.owns(this,profile)){finish();return;}
@@ -169,7 +170,7 @@ public final class AiSummaryActivity extends Activity {
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("确认发送给 AI 服务？").setView(scroll)
                 .setPositiveButton("确认发送一次",(d,w)->startGeneration(source,service,context)).setNegativeButton("取消",null).create();
         openConfirmation=dialog;dialog.setOnDismissListener(d->{if(openConfirmation==dialog)openConfirmation=null;});
-        dialog.setOnShowListener(d->{dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);dialog.getWindow().setLayout(-1,(int)(getResources().getDisplayMetrics().heightPixels*.85));});dialog.show();
+        dialog.setOnShowListener(d->{ScreenPrivacy.protect(dialog.getWindow());dialog.getWindow().setLayout(-1,(int)(getResources().getDisplayMetrics().heightPixels*.85));});dialog.show();
     }
 
     private void requireSource(SummaryInput expected)throws IOException{
@@ -309,7 +310,7 @@ public final class AiSummaryActivity extends Activity {
                 .setNeutralButton("返回通知正文",(d,w)->finish()).create();
         if(openEvidenceDialog!=null)openEvidenceDialog.dismiss();openEvidenceDialog=dialog;
         dialog.setOnDismissListener(d->{if(openEvidenceDialog==dialog)openEvidenceDialog=null;});
-        dialog.setOnShowListener(d->{dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);body.post(()->{if(body.getLayout()!=null)scroll.scrollTo(0,body.getTop()+body.getLayout().getLineTop(body.getLayout().getLineForOffset(unit.start)));});});dialog.show();
+        dialog.setOnShowListener(d->{ScreenPrivacy.protect(dialog.getWindow());body.post(()->{if(body.getLayout()!=null)scroll.scrollTo(0,body.getTop()+body.getLayout().getLineTop(body.getLayout().getLineForOffset(unit.start)));});});dialog.show();
     }
     private TextView note(LinearLayout page,String value,int size,int color){TextView text=ReaderUi.text(this,value,size,color);text.setLineSpacing(dp(3),1);text.setPadding(0,dp(8),0,dp(8));page.addView(text);return text;}
     private Button button(LinearLayout page,String value,Runnable action){Button button=new Button(this);button.setText(value);button.setAllCaps(false);button.setMinHeight(dp(48));button.setOnClickListener(v->action.run());page.addView(button,new LinearLayout.LayoutParams(-1,-2));return button;}

@@ -1,4 +1,5 @@
 package org.campusreader.reader;
+import org.campusreader.auth.ScreenPrivacy;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -22,7 +23,7 @@ public final class LoginActivity extends Activity {
     private boolean busy,closed,attempted,manage;private int generation;private boolean waitingVpn,vpnFallbackTried;
     private String pendingAccount,pendingPassword;private boolean pendingRemember;private long pendingExpires;
     @Override public void onCreate(Bundle state){
-        super.onCreate(state);getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        super.onCreate(state);ScreenPrivacy.protect(getWindow());
         getWindow().setStatusBarColor(ReaderUi.SURFACE);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         manage=getIntent().getBooleanExtra(EXTRA_MANAGE,false);build();
     }

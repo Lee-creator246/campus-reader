@@ -1,4 +1,5 @@
 package org.campusreader.reader;
+import org.campusreader.auth.ScreenPrivacy;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -44,7 +45,7 @@ public class PortalLoginActivity extends Activity {
     private PortalCredentialStore.Credentials launchCredentials;private boolean launchRemember;
     private final Runnable deadline=()->{if(!closed){setStatus("门户恢复超时，可返回缓存后手动重试。");if(automatic)finish();}};
     @Override public void onCreate(Bundle state){
-        super.onCreate(state);getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        super.onCreate(state);ScreenPrivacy.protect(getWindow());
         automatic=getIntent().getBooleanExtra(EXTRA_AUTOMATIC,false);manage=getIntent().getBooleanExtra(EXTRA_MANAGE,false);
         profile=getIntent().getStringExtra(EXTRA_PROFILE);site=CampusSite.scopeId();account=PortalAccess.account(this);
         if(profile==null||!profile.matches("campus:[a-f0-9]{64}")||!profile.equals(MediaSafety.readerProfile(account))||!PortalAccess.isReady(this)){finish();return;}

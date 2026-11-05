@@ -1,4 +1,5 @@
 package org.campusreader.reader;
+import org.campusreader.auth.ScreenPrivacy;
 
 import android.app.*;
 import android.content.*;
@@ -137,7 +138,7 @@ public final class AiSummaryPresentation {
             public void onActivityStopped(Activity a){if(a==activity)dialog.dismiss();}
             public void onActivityCreated(Activity a,Bundle b){}public void onActivityStarted(Activity a){}public void onActivityResumed(Activity a){}public void onActivityPaused(Activity a){}public void onActivitySaveInstanceState(Activity a,Bundle b){}public void onActivityDestroyed(Activity a){if(a==activity)dialog.dismiss();}
         };
-        dialog.setOnShowListener(d->{Window window=dialog.getWindow();if(window!=null){window.addFlags(WindowManager.LayoutParams.FLAG_SECURE);window.setGravity(Gravity.BOTTOM);window.setLayout(-1,(int)(activity.getResources().getDisplayMetrics().heightPixels*.68));}body.post(()->{if(body.getLayout()!=null)scroll.scrollTo(0,body.getTop()+body.getLayout().getLineTop(body.getLayout().getLineForOffset(Math.min(reference.start,body.length()))));});});
+        dialog.setOnShowListener(d->{Window window=dialog.getWindow();if(window!=null){ScreenPrivacy.protect(window);window.setGravity(Gravity.BOTTOM);window.setLayout(-1,(int)(activity.getResources().getDisplayMetrics().heightPixels*.68));}body.post(()->{if(body.getLayout()!=null)scroll.scrollTo(0,body.getTop()+body.getLayout().getLineTop(body.getLayout().getLineForOffset(Math.min(reference.start,body.length()))));});});
         Runnable check=new Runnable(){@Override public void run(){if(!dialog.isShowing())return;if(!current(activity,profile,key,cached)){dialog.dismiss();return;}content.postDelayed(this,1000);}};
         dialog.setOnDismissListener(d->{content.removeCallbacks(check);activity.getApplication().unregisterActivityLifecycleCallbacks(lifecycle);});activity.getApplication().registerActivityLifecycleCallbacks(lifecycle);dialog.show();content.postDelayed(check,1000);
     }

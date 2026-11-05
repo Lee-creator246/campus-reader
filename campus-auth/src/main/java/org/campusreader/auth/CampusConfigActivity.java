@@ -60,7 +60,7 @@ public final class CampusConfigActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        ScreenPrivacy.protect(getWindow());
         getWindow().setStatusBarColor(Color.WHITE);
         getWindow().setNavigationBarColor(Build.VERSION.SDK_INT >= 26 ? Color.WHITE : INK);
         int flags=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
@@ -190,7 +190,7 @@ public final class CampusConfigActivity extends Activity {
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("粘贴校园配置").setView(content)
                 .setPositiveButton("预览差异",null).setNegativeButton("取消",null).create();
         dialog.setOnShowListener(ignored->{
-            dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            ScreenPrivacy.protect(dialog.getWindow());
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
                 try{CampusSite.Profile next=CampusConfigImport.parse(input.getText().toString());dialog.dismiss();previewImport(next);}
                 catch(IllegalArgumentException invalid){input.setError(invalid.getMessage());}
@@ -240,7 +240,7 @@ public final class CampusConfigActivity extends Activity {
                     domain.setText(next.domain);vpn.setText(next.vpnUrl);list.setText(next.portalListUrl);portalLogin.setText(next.loginUrl);
                     selectedName="";selectedScope="";selectedSchool.setText("自定义校园 · 尚未保存");consent.setChecked(CampusConfiguration.isUnchanged(next));status.setText("已填入表单，尚未保存。请核对入口与连接服务说明，再点击保存。");
                 }).setNegativeButton("取消",null).create();
-        dialog.setOnShowListener(ignored->dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE));dialog.show();
+        dialog.setOnShowListener(ignored->ScreenPrivacy.protect(dialog.getWindow()));dialog.show();
     }
     private void previewField(StringBuilder out,String label,String before,String after){
         String current=before.trim();boolean same=current.equals(after);
@@ -275,7 +275,7 @@ public final class CampusConfigActivity extends Activity {
         if(next.portalListUrl.startsWith("http:")||next.loginUrl.startsWith("http:"))description+="\n此配置含 HTTP 门户地址，网页传输可能未加密；自动密码登录仅可用于已确认的 HTTPS 认证页面。";
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle(entry.name).setMessage(description).setNegativeButton("取消",null).setPositiveButton("选择学校",(d,w)->{
             fillForm(next);selectedName=entry.name;selectedScope=next.scopeId;selectedSchool.setText(entry.name+" · "+(CampusConfiguration.isUnchanged(next)?"当前使用":"待保存"));consent.setChecked(CampusConfiguration.isUnchanged(next));status.setText("已选择学校，请核对连接服务说明后继续。");
-        }).create();dialog.show();dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        }).create();dialog.show();ScreenPrivacy.protect(dialog.getWindow());
     }
     private void previewDirectory(String document,SchoolDirectory parsed){
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("导入学校目录")
@@ -283,14 +283,14 @@ public final class CampusConfigActivity extends Activity {
                 .setNegativeButton("取消",null).setPositiveButton("导入目录",(d,w)->{
                     try{new SchoolDirectoryStore(this).save(document);directory=parsed;renderSchools();status.setText("学校目录已导入，请搜索并选择学校。");}
                     catch(Exception failure){status.setText("目录未能保存，请重试。当前校园配置未更改。");}
-                }).create();dialog.show();dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+                }).create();dialog.show();ScreenPrivacy.protect(dialog.getWindow());
     }
     private void downloadDirectory(){
         if(saving||importing||CampusConfiguration.requiresRestart())return;
         EditText input=new EditText(this);input.setSingleLine(true);input.setHint("https://目录提供方/学校目录.json");input.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI);input.setTextSize(15);input.setSaveEnabled(false);input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(4096)});
         LinearLayout content=column();content.setPadding(dp(20),dp(8),dp(20),0);content.addView(text("填写你信任的目录提供方地址。只下载配置数据，下载后仍需确认导入。",14,MUTED));add(content,input,12);
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("下载学校目录").setView(content).setNegativeButton("取消",null).setPositiveButton("下载",null).create();
-        dialog.setOnShowListener(ignored->{dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+        dialog.setOnShowListener(ignored->{ScreenPrivacy.protect(dialog.getWindow());dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             final String address;try{address=SchoolDirectory.downloadUrl(input.getText().toString());}catch(IllegalArgumentException invalid){input.setError(invalid.getMessage());return;}
             dialog.dismiss();importing=true;setFormEnabled(false);status.setText("正在下载学校目录…");
             imports.execute(()->{

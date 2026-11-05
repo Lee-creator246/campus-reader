@@ -1,4 +1,5 @@
 package org.campusreader.reader;
+import org.campusreader.auth.ScreenPrivacy;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -26,7 +27,7 @@ public final class AiSettingsActivity extends Activity {
     private TextView status;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     @Override public void onCreate(Bundle state){
-        super.onCreate(state);getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        super.onCreate(state);ScreenPrivacy.protect(getWindow());
         profile=getIntent().getStringExtra(EXTRA_PROFILE);if(!AiProfile.owns(this,profile)){finish();return;}
         settings=new AiSettings(this,profile);
         provider=settings.provider();

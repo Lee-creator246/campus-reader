@@ -37,7 +37,7 @@ public final class CampusAuthActivity extends Activity implements CampusAuthCont
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        ScreenPrivacy.protect(getWindow());
         if(!CampusConfiguration.isConfigured()){
             startActivityForResult(new Intent(this,CampusConfigActivity.class),CONFIGURATION);
             return;

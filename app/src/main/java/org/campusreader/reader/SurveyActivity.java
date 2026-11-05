@@ -1,4 +1,5 @@
 package org.campusreader.reader;
+import org.campusreader.auth.ScreenPrivacy;
 
 import android.app.*;
 import android.content.Intent;
@@ -18,7 +19,7 @@ public final class SurveyActivity extends Activity {
     private AlertDialog previewDialog;
     @Override public void onCreate(Bundle state){
         super.onCreate(state);profile=getIntent().getStringExtra(EXTRA_PROFILE);if(!PreferenceProfile.ownsCurrent(this,profile)){finish();return;}
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);getWindow().setStatusBarColor(ReaderUi.SURFACE);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        ScreenPrivacy.protect(getWindow());getWindow().setStatusBarColor(ReaderUi.SURFACE);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         ScrollView scroll=new ScrollView(this);LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setPadding(dp(20),dp(16),dp(20),dp(28));page.setBackgroundColor(ReaderUi.SURFACE);scroll.addView(page);setContentView(scroll);
         Button back=button("返回",this::finish);page.addView(back);text(page,"体验反馈",24,ReaderUi.INK);text(page,STATEMENT,14,ReaderUi.MUTED);
         recommendation=rating(page,"推荐内容是否符合你的关注？");notifications=rating(page,"提醒是否及时且不过度打扰？");summary=rating(page,"AI 摘要是否简洁、准确且有帮助？");

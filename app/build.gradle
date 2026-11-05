@@ -20,6 +20,13 @@ android {
             minifyEnabled false
             vcsInfo.include false
         }
+        personal {
+            initWith release
+            applicationIdSuffix '.personal'
+            versionNameSuffix '-personal'
+            matchingFallbacks = ['release']
+            resValue 'bool', 'allow_screen_capture', 'true'
+        }
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
@@ -29,6 +36,7 @@ android {
     testOptions {
         unitTests.includeAndroidResources = true
         unitTests.all {
+            systemProperty 'campus.captureAllowed', name == 'testPersonalUnitTest'
             systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'
             jvmArgs '--add-opens=java.base/java.lang=ALL-UNNAMED', '--add-opens=java.base/java.util=ALL-UNNAMED',
                     '--add-opens=java.base/java.io=ALL-UNNAMED', '--add-opens=java.base/java.net=ALL-UNNAMED',
