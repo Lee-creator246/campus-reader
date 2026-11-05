@@ -36,7 +36,7 @@ jobs:
           DEVICE=$(cat /tmp/campus-simulator-id)
           xcrun simctl boot "$DEVICE" || true
           xcrun simctl bootstatus "$DEVICE" -b
-          xcodebuild -project ios/CampusReader.xcodeproj -scheme CampusReader -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath ios/build/simulator -resultBundlePath ios/build/Tests.xcresult CODE_SIGNING_ALLOWED=NO test
+          xcodebuild -project ios/CampusReader.xcodeproj -scheme CampusReader -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -parallel-testing-enabled NO -derivedDataPath ios/build/simulator -resultBundlePath ios/build/Tests.xcresult CODE_SIGNING_ALLOWED=NO test
       - name: Package build evidence
         if: always()
         run: |

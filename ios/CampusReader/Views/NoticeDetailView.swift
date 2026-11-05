@@ -19,7 +19,21 @@ struct NoticeImage: View {
             let owner = model.profileID
             if let data = try? await MediaStore.data(url: url, model: model), owner == model.profileID { image = UIImage(data: data) }
         }.sheet(isPresented: $zoom) {
-            if let image { NavigationStack { ScrollView([.horizontal, .vertical]) { Image(uiImage: image).resizable().scaledToFit().frame(minWidth: 320) }.toolbar { ToolbarItem(placement: .confirmationAction) { Button("关闭") { zoom = false } }; ToolbarItem(placement: .bottomBar) { Button("保存 / 分享图片") { shareImage(image) } } } }
+            if let image {
+                NavigationStack {
+                    ScrollView([.horizontal, .vertical]) {
+                        Image(uiImage: image).resizable().scaledToFit().frame(minWidth: 320)
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("关闭") { zoom = false }
+                        }
+                        ToolbarItem(placement: .bottomBar) {
+                            Button("保存 / 分享图片") { shareImage(image) }
+                        }
+                    }
+                }
+            }
         }
     }
     private func shareImage(_ image: UIImage) {
