@@ -7,6 +7,7 @@
 | Gradle 8.11.1 Wrapper（脚本及 JAR） | 保留官方生成文件，受 Apache-2.0 及其包含的第三方条款约束；完整分发许可证见 `licenses/GRADLE-LICENSE.txt` |
 | AndroidX DrawerLayout / SwipeRefreshLayout、Android 构建工具、desugar 库 | Gradle 从官方仓库下载，源码包不附二进制；适用各自上游许可证 |
 | jsoup 1.23.2 | Gradle 从 Maven Central 下载，适用 [上游 MIT 许可证](https://github.com/jhy/jsoup/blob/master/LICENSE) |
+| SwiftSoup 2.9.6 | iOS 的门户 HTML 和 RSS 解析使用此 Swift Package。应用随附[上游许可证副本](ios/CampusReader/Resources/SwiftSoup-LICENSE.txt)。 |
 | OkHttp 4.12.0 | AI 独立 HTTP 客户端，Gradle 从 Maven Central 获取；适用 [Apache-2.0 许可证](https://github.com/square/okhttp/blob/parent-4.12.0/LICENSE.txt)，版本与依赖见 [发布 POM](https://repo.maven.apache.org/maven2/com/squareup/okhttp3/okhttp/4.12.0/okhttp-4.12.0.pom) |
 | Okio / Kotlin 标准库 | OkHttp 的运行时传递依赖，保留 [Okio Apache-2.0 许可证](https://github.com/square/okio/blob/master/LICENSE.txt)及 [Kotlin Apache-2.0 许可证](https://github.com/JetBrains/kotlin/blob/master/license/LICENSE.txt)；最终版本以 Gradle 解析结果为准 |
 | PDFBox-Android 2.0.27.0 | 在本机提取用户选择的 PDF 文字；Gradle 从 Maven Central 获取，适用 [上游 Apache-2.0 许可证及第三方说明](https://github.com/TomRoush/PdfBox-Android)。不使用联网文档解析服务，不执行 PDF 脚本或附件 |

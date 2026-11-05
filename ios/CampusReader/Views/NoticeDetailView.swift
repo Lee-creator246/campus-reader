@@ -14,7 +14,7 @@ struct NoticeImage: View {
                     if thumbnail { Image(uiImage: image).resizable().scaledToFill().frame(width: 78, height: 78).clipped().clipShape(RoundedRectangle(cornerRadius: 10)) }
                     else { Image(uiImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 12)) }
                 }.buttonStyle(.plain).accessibilityLabel("查看通知图片")
-            }
+            } else { Color.clear.frame(width: 0, height: 0).accessibilityHidden(true) }
         }.task(id: url) {
             let owner = model.profileID
             if let data = try? await MediaStore.data(url: url, model: model), owner == model.profileID { image = UIImage(data: data) }

@@ -4,6 +4,21 @@ import UIKit
 import CampusReaderCore
 
 @MainActor final class AIService: ObservableObject {
+    struct Dependencies {
+        var cacheDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first?.appendingPathComponent("AISummaries", isDirectory: true)
+        var readKey: (String) throws -> Data? = KeychainStore.read
+        var writeKey: (Data, String) throws -> Void = { try KeychainStore.write($0, key: $1) }
+        var deleteKey: (String) throws -> Void = KeychainStore.delete
+        var sessionConfiguration: () -> URLSessionConfiguration = { .ephemeral }
+        var isActive: @MainActor () -> Bool = { UIApplication.shared.applicationState == .active }
+    }
+    private let dependencies: Dependencies
+
+    init(dependencies: Dependencies = Dependencies()) {
+        self.dependencies = dependencies
+    }
+
     @Published private(set) var configuration = SummaryConfiguration.default
     @Published private(set) var status = "AI 初始关闭；配置并授权后可自动摘要。"
     @Published private(set) var isBusy = false
@@ -27,8 +42,7 @@ import CampusReaderCore
     private var passages: [String: [PolicyPassage]] = [:]
     private var fileURL: URL? {
         guard !profile.isEmpty else { return nil }
-        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("AISummaries", isDirectory: true).appendingPathComponent(AIHash.text(profile) + ".json")
+        return dependencies.cacheDirectory?.appendingPathComponent(AIHash.text(profile) + ".json")
     }
     func activate(profile: String) {
         if profile == self.profile && storageOK { return }
@@ -51,9 +65,9 @@ import CampusReaderCore
         let keyName = credentialKey(next)
         if next.enabled {
             if cleaned.isEmpty {
-                guard next.endpoint == configuration.endpoint, try KeychainStore.read(keyName) != nil else { throw AIError.missingKey }
-            } else { try KeychainStore.write(Data(cleaned.utf8), key: keyName) }
-        } else if !cleaned.isEmpty { try KeychainStore.write(Data(cleaned.utf8), key: keyName) }
+                guard next.endpoint == configuration.endpoint, try dependencies.readKey(keyName) != nil else { throw AIError.missingKey }
+            } else { try dependencies.writeKey(Data(cleaned.utf8), keyName) }
+        } else if !cleaned.isEmpty { try dependencies.writeKey(Data(cleaned.utf8), keyName) }
         invalidate(); state.configuration = next; state.queue = []; passages = [:]
         try save(); configuration = next; cacheRevision += 1
         status = next.enabled ? (next.automatic ? "自动摘要已开启；请求次数在本机计数。" : "已启用手动摘要。") : "AI 已关闭，已有有效摘要仍可查看。"
@@ -84,10 +98,10 @@ import CampusReaderCore
     func summarize(_ notice: Notice, policies: [PolicyPassage] = [], manual: Bool = true) async throws -> CitedSummary {
         guard storageOK, !profile.isEmpty else { throw AIError.storage }
         guard configuration.enabled else { throw AIError.disabled }
-        guard UIApplication.shared.applicationState == .active else { throw AIError.cancelled }
+        guard dependencies.isActive() else { throw AIError.cancelled }
         guard !isBusy else { throw AIError.busy }
         let config = try configuration.validated()
-        guard let keyData = try KeychainStore.read(credentialKey(config)), let key = String(data: keyData, encoding: .utf8), !key.isEmpty else { throw AIError.missingKey }
+        guard let keyData = try dependencies.readKey(credentialKey(config)), let key = String(data: keyData, encoding: .utf8), !key.isEmpty else { throw AIError.missingKey }
         let source = try AISourceSnapshot(notice: notice, policies: config.sharePolicies ? policies : [])
         let body = try AIResponseEnvelope.request(configuration: config, source: source)
         var ledger = state.ledger
@@ -96,7 +110,7 @@ import CampusReaderCore
         let owner = profile, revision = generation
         currentNotices[notice.id] = notice; activeNotice = notice
         isBusy = true; status = "正在生成并核对原文依据…"
-        let request = AITransport(); transport = request
+        let request = AITransport(configuration: dependencies.sessionConfiguration()); transport = request
         // Finish only an already-authorized foreground request; this is not a background scheduler.
         let continuationTask = UIApplication.shared.beginBackgroundTask(withName: "FinishSummary") { request.cancel() }
         defer {
@@ -130,7 +144,7 @@ import CampusReaderCore
     }
     func clearCredentials() {
         do {
-            try KeychainStore.delete(credentialKey(configuration)); invalidate()
+            try dependencies.deleteKey(credentialKey(configuration)); invalidate()
             state.configuration.enabled = false; state.configuration.automatic = false; state.queue = []
             try save(); configuration = state.configuration; status = "已删除当前服务的密钥并关闭 AI。"
         } catch { status = AIError.storage.localizedDescription }
@@ -152,13 +166,13 @@ import CampusReaderCore
         do { try save(); cacheRevision += 1 } catch { status = AIError.storage.localizedDescription }
     }
     private func kick() {
-        guard UIApplication.shared.applicationState == .active, pumpTask == nil, !isBusy, configuration.enabled, configuration.automatic else { return }
+        guard dependencies.isActive(), pumpTask == nil, !isBusy, configuration.enabled, configuration.automatic else { return }
         let token = generation
         pumpTask = Task { [weak self] in
             guard let self else { return }
             var quotaReached = false
             for _ in 0..<3 {
-                guard !Task.isCancelled, token == self.generation, UIApplication.shared.applicationState == .active,
+                guard !Task.isCancelled, token == self.generation, self.dependencies.isActive(),
                       let queued = self.state.queue.first(where: { self.currentNotices[$0.id]?.bodyVersion == $0.version }),
                       let notice = self.currentNotices[queued.id] else { break }
                 do { _ = try await self.summarize(notice, policies: self.passages[notice.id] ?? [], manual: false) }
@@ -167,7 +181,7 @@ import CampusReaderCore
             }
             guard token == self.generation else { return }
             self.pumpTask = nil
-            if !quotaReached, !Task.isCancelled, UIApplication.shared.applicationState == .active,
+            if !quotaReached, !Task.isCancelled, self.dependencies.isActive(),
                self.state.queue.contains(where: { self.currentNotices[$0.id]?.bodyVersion == $0.version }) { self.kick() }
         }
     }

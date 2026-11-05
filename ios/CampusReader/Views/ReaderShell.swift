@@ -11,6 +11,8 @@ struct ReaderShell: View {
     @ObservedObject var portal: PortalService
     @State private var sidebar = false
     @State private var destination: ReaderDestination?
+    @State private var pendingDestination: ReaderDestination?
+    @State private var pendingLogin = false
     var body: some View {
         Group {
             if !model.ready { ProgressView("正在准备本机资料…") }
@@ -27,7 +29,7 @@ struct ReaderShell: View {
             }
         }
         .tint(Color(red: 0.13, green: 0.33, blue: 0.68))
-        .sheet(isPresented: $sidebar) {
+        .sheet(isPresented: $sidebar, onDismiss: finishSidebar) {
             NavigationStack {
                 List {
                     Section {
@@ -45,7 +47,7 @@ struct ReaderShell: View {
                         Section("我的标签") { ForEach(model.allTags, id: \.self) { tag in Button(tag) { model.tag = tag; model.topic = nil; sidebar = false } } }
                     }
                     Section("连接与设置") {
-                        Button { sidebar = false; model.loginAutomatically = false; model.showLogin = true } label: { Label("门户账号与连接", systemImage: "person.crop.circle") }
+                        Button { pendingLogin = true; sidebar = false } label: { Label("门户账号与连接", systemImage: "person.crop.circle") }
                         destinationButton("刷新与提醒记录", icon: "clock.arrow.circlepath", value: .history)
                         destinationButton("阅读与通知设置", icon: "gearshape", value: .settings)
                         destinationButton("体验反馈", icon: "bubble.left", value: .feedback)
@@ -54,12 +56,12 @@ struct ReaderShell: View {
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { sidebar = false } } }
             }
         }
-        .sheet(item: $destination, onDismiss: { model.enqueueSummaries() }) { item in
+        .sheet(item: $destination, onDismiss: { model.enqueueSummaries(); openPendingLogin() }) { item in
             NavigationStack {
                 Group {
                     switch item {
                     case .interests: InterestsView(model: model)
-                    case .settings: ReaderSettingsView(model: model)
+                    case .settings: ReaderSettingsView(model: model) { pendingLogin = true; destination = nil }
                     case .ai: AISettingsView(service: model.ai)
                     case .policies: PoliciesView(store: model.policies)
                     case .history: HistoryView(model: model)
@@ -78,7 +80,15 @@ struct ReaderShell: View {
         .onChange(of: portal.profileID) { _ in model.accountSelectionChanged() }
     }
     private func destinationButton(_ title: String, icon: String, value: ReaderDestination) -> some View {
-        Button { sidebar = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { destination = value } } label: { Label(title, systemImage: icon) }
+        Button { pendingDestination = value; sidebar = false } label: { Label(title, systemImage: icon) }
+    }
+    private func finishSidebar() {
+        if let next = pendingDestination { pendingDestination = nil; destination = next }
+        else { openPendingLogin() }
+    }
+    private func openPendingLogin() {
+        guard pendingLogin else { return }
+        pendingLogin = false; model.loginAutomatically = false; model.showLogin = true
     }
 }
 

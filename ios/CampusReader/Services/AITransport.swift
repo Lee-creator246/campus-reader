@@ -3,6 +3,11 @@ import CampusReaderCore
 
 /// A separate ephemeral session: campus cookies, credentials and redirect targets never enter it.
 final class AITransport: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let configuration: URLSessionConfiguration
+    init(configuration: URLSessionConfiguration) {
+        self.configuration = configuration
+        super.init()
+    }
     private let lock = NSLock()
     private var session: URLSession?
     private var task: URLSessionDataTask?
@@ -16,7 +21,7 @@ final class AITransport: NSObject, URLSessionDataDelegate, @unchecked Sendable {
                 lock.lock()
                 if cancelled { lock.unlock(); continuation.resume(throwing: AIError.cancelled); return }
                 self.continuation = continuation
-                let config = URLSessionConfiguration.ephemeral
+                let config = configuration
                 config.httpCookieStorage = nil; config.httpShouldSetCookies = false; config.urlCredentialStorage = nil
                 config.urlCache = nil; config.timeoutIntervalForRequest = 30; config.timeoutIntervalForResource = 45
                 let session = URLSession(configuration: config, delegate: self, delegateQueue: nil); self.session = session
