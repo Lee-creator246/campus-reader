@@ -10,7 +10,7 @@ permissions:
   contents: read
 concurrency:
   group: ios-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   ios:
     runs-on: macos-15-intel
@@ -30,12 +30,15 @@ jobs:
         run: swift test --package-path ios/CampusReaderCore
       - name: Build unsigned iPhone application
         run: bash ios/scripts/build.sh
-      - name: Simulator integration and UI tests
+      - name: Start a compatible iPhone simulator
         run: |
           python3 ios/scripts/select_simulator.py > /tmp/campus-simulator-id
           DEVICE=$(cat /tmp/campus-simulator-id)
           xcrun simctl boot "$DEVICE" || true
           xcrun simctl bootstatus "$DEVICE" -b
+      - name: Simulator integration and UI tests
+        run: |
+          DEVICE=$(cat /tmp/campus-simulator-id)
           xcodebuild -project ios/CampusReader.xcodeproj -scheme CampusReader -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -parallel-testing-enabled NO -derivedDataPath ios/build/simulator -resultBundlePath ios/build/Tests.xcresult CODE_SIGNING_ALLOWED=NO test
       - name: Package build evidence
         if: always()
