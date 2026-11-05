@@ -135,7 +135,10 @@ struct ReaderListView: View {
                                     if !notice.tags.isEmpty { Text(notice.tags.map { "#" + $0 }.joined(separator: " ")).lineLimit(1) }
                                 }.font(.caption).foregroundStyle(.secondary)
                             }
-                        }.padding(.vertical, 8).contentShape(Rectangle())
+                        }
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                         .accessibilityIdentifier("notice-" + notice.id)
                         .accessibilityLabel(notice.title + (notice.isRead ? "，已读" : "，未读"))

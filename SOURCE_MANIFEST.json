@@ -219,7 +219,7 @@
   "ios/CampusReader/Views/NoticeDetailView.swift": "5333faf9f36aaf963b40af952e2f93614096bb5b951e0197e636a25f5de194f0",
   "ios/CampusReader/Views/PortalLoginView.swift": "97cee96c5b66f81cba2cd14ab463d3796aba1161b30d9c918b1126c13471129c",
   "ios/CampusReader/Views/ReaderSettingsView.swift": "d8d4d2d80278552285bbc604d165215ddd9cf1625c6aecd3d72987fed898cc6d",
-  "ios/CampusReader/Views/ReaderShell.swift": "1999080147c505f188767f675b9ab43919b99e88b34f1984bc005653d526f631",
+  "ios/CampusReader/Views/ReaderShell.swift": "3a71a32ecd8d2aa1cb353ca25b833dd070b561b866329a263a4ca314a0f63c10",
   "ios/CampusReaderCore/Package.swift": "5b7685eedee4e7f41b50642f24fba9216844008d88c0e69a215e50ea9b125103",
   "ios/CampusReaderCore/Sources/CampusReaderCore/AIJSON.swift": "7653e8829c6d19bbc2f23b60f76175ceec1fe69b75334fa803217ef21729d723",
   "ios/CampusReaderCore/Sources/CampusReaderCore/AIModels.swift": "c37d32bf50e1c06d7f90bacd44540dff6ed04545b6482becc872ceca7ff9b12d",
