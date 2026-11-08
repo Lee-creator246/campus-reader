@@ -4,7 +4,7 @@ import os,re,subprocess,sys,hashlib
 ROOT=Path(__file__).resolve().parents[1]
 ROOT_FILES={'settings.gradle','build.gradle','gradle.properties','gradlew','gradlew.bat','LICENSE','README.md','BUILDING.md','THIRD_PARTY_NOTICES.md','CONTRIBUTING.md','SECURITY.md','CHANGELOG.md','.gitignore','.gitattributes','.editorconfig','SOURCE_MANIFEST.json'}
 DIRS={'campus-config','app','campus-auth','campus-extension','campus-portal','checks','gradle','docs','scripts','licenses','vendor','.github','ios','web'}
-GENERATED={'build','.gradle','.git','dist','__pycache__','.build','DerivedData','xcuserdata','CampusReader.xcodeproj','SafariReaderSmoke.xcodeproj'}
+GENERATED={'build','.gradle','.git','dist','__pycache__','.build','DerivedData','xcuserdata','CampusReader.xcodeproj','SafariReaderSmoke.xcodeproj','.wrangler','node_modules'}
 WRAPPER='gradle/wrapper/gradle-wrapper.jar'
 DENIED_EXT={'.apk','.aab','.xapk','.aar','.so','.dex','.zip','.jks','.keystore','.key','.pem','.p12','.pfx','.db','.sqlite','.sqlite3','.png','.jpg','.jpeg','.log','.pyc','.ipa','.mobileprovision','.provisionprofile'}
 PATTERNS=[
@@ -36,7 +36,7 @@ def validate(files,staged=None):
         parts=Path(relative).parts
         if (len(parts)==1 and relative not in ROOT_FILES) or (len(parts)>1 and parts[0] not in DIRS):errors.append(relative+': not allowlisted')
         if any(part in GENERATED for part in parts):errors.append(relative+': generated/private directory')
-        if path.name.startswith('push-state.json') or path.name in {'feedback.ndjson','public-notices.json'}:
+        if path.name.startswith(('push-state.json','.dev.vars')) or path.name in {'feedback.ndjson','public-notices.json'}:
             errors.append(relative+': private server state or operator data');continue
         if path.suffix.lower() in DENIED_EXT or path.name in {'local.properties','campus.local.properties','keystore.properties','signing.properties'} or path.name.startswith('.env'):errors.append(relative+': excluded material');continue
         if relative==WRAPPER:continue

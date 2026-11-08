@@ -52,3 +52,7 @@ web/safari-tests/SafariReaderSmoke.xcodeproj/
 push-state.json*
 feedback.ndjson
 public-notices.json
+.wrangler/
+.dev.vars
+.dev.vars.*
+node_modules/

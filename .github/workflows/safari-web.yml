@@ -20,7 +20,7 @@ jobs:
       - name: Test service and portal probe
         run: python -m unittest discover -s web/tests -p 'test_*.py'
       - name: Test notification subscription and delivery behavior
-        run: node --test web/tests/*.test.mjs
+        run: node --test web/tests/*.test.mjs web/cloudflare/worker.test.mjs
       - name: Build site and server archive
         run: python web/build.py --output dist/safari
       - name: Verify HTTPS server package on loopback
@@ -29,6 +29,17 @@ jobs:
         with:
           name: safari-server-package
           path: dist/safari/campus-reader-safari-server.zip
+      - name: Prepare independent Cloudflare Worker for account-owner deployment
+        env:
+          SAFARI_API_ORIGIN: ${{ vars.SAFARI_API_ORIGIN }}
+          WRANGLER_SEND_METRICS: 'false'
+        run: |
+          python web/cloudflare/build.py --site dist/safari/site --output dist/cloudflare --upstream "$SAFARI_API_ORIGIN"
+          npx --yes wrangler@4.158.0 deploy --config dist/cloudflare/worker/wrangler.json --dry-run --outdir "$RUNNER_TEMP/worker-check"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: safari-cloudflare-package
+          path: dist/cloudflare/campus-reader-cloudflare-worker.zip
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist/safari/site
