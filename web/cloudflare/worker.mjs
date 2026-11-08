@@ -82,16 +82,23 @@ export async function handle(request, env, upstreamFetch = fetch) {
     headers.Origin = origin;
   }
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
+  const timeout = setTimeout(() => controller.abort(), 16000);
   try {
     const upstream = await upstreamFetch(new URL(url.pathname, origin), {
       method: request.method, headers, body, redirect: "manual", signal: controller.signal,
     });
     if (upstream.status >= 300 && upstream.status < 400 || !isJson(upstream)) return reject(502, "unexpected_upstream_response");
-    const json = await readJSON(upstream, 512 * 1024);
+    let json;
+    try { json = await readJSON(upstream, 512 * 1024); }
+    catch (err) {
+      if (controller.signal.aborted) throw err;
+      return reject(502, "invalid_upstream_json");
+    }
     if (!json || typeof json !== "object" || Array.isArray(json)) return reject(502, "invalid_upstream_json");
     return new Response(JSON.stringify(json), {status: upstream.status, headers: jsonHeaders});
-  } catch { return reject(502, "upstream_unavailable"); }
+  } catch {
+    return controller.signal.aborted ? reject(504, "upstream_timeout") : reject(502, "upstream_unavailable");
+  }
   finally { clearTimeout(timeout); }
 }
 

@@ -56,7 +56,8 @@ const messages = {
 };
 async function api(name, record) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
+  // Leave time to receive the gateway's response before treating a write as indeterminate.
+  const timer = setTimeout(() => controller.abort(), 22000);
   try {
     const options = {cache: "no-store", redirect: "error", credentials: "omit", signal: controller.signal};
     if (record) {

@@ -140,7 +140,7 @@ function render() {
 }
 async function request(url, options = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+  const timer = setTimeout(() => controller.abort(), 22000);
   try {
     const response = await fetch(url, {...options, signal: controller.signal, redirect: "error", cache: "no-store"});
     if (!response.ok) throw new Error("HTTP " + response.status);
@@ -208,7 +208,7 @@ async function submitFeedback() {
     });
     $("feedback-message").value = "";
     feedback("已提交反馈。");
-  } catch (error) { feedback("提交失败（" + error.message + "），可以复制反馈后交给维护者。"); }
+  } catch (error) { feedback("未收到提交确认（" + error.message + "）。文字已保留，可复制给维护者。"); }
   finally { $("send-feedback").disabled = false; }
 }
 async function copyFeedback() {
