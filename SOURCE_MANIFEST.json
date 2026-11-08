@@ -284,7 +284,7 @@
   "web/public/reader.css": "7581126b4e9e01adc36a26ce21cd6adeec6abc41b9a683ac8be946891da0f1d7",
   "web/public/reader.js": "4004141fda4678972a85be8427a275af8f587424e73458c76bf14b8ee0cd37f8",
   "web/safari-tests/Launcher/Launcher.swift": "d4ab2acf138ab60324ccac4386f3f6ebfe9e2ecbc0d69ddcb5bb0074d947f36a",
-  "web/safari-tests/UITests/MobileSafariTests.swift": "ef0961356d90fce737a545501cff393e94ae6b432ba15cbd819c9fe4e037c2bd",
+  "web/safari-tests/UITests/MobileSafariTests.swift": "5d75b6b2ecafcdd0242ddd38dcb850e4f411e4ce29d98aeb94d135c51474e4af",
   "web/safari-tests/project.yml": "cde596cd59e111d91f1269d4301fbda972183f5efdc019550cec8d08fd5de17b",
   "web/server/Caddyfile": "2319b0434bb30985d35faca8142e9f9771f61bc9b387bfa3f5f83b4f87e14d6e",
   "web/server/compose.yaml": "970c2c2a9bc869d760752a6283a50a8814de29f1e6cc31a1f6af7f788ecf58ad",
