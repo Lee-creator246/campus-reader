@@ -1,0 +1,44 @@
+name: Safari reading beta
+on:
+  push:
+    branches: [main]
+    paths: ['web/**', 'ios/project.yml', '.github/workflows/safari-web.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: safari-website
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Test service and portal probe
+        run: python -m unittest discover -s web/tests -p 'test_*.py'
+      - name: Build site and server archive
+        run: python web/build.py --output dist/safari
+      - name: Verify HTTPS server package on loopback
+        run: bash web/tests/smoke_compose.sh dist/safari/campus-reader-safari-server.zip
+      - uses: actions/upload-artifact@v6
+        with:
+          name: safari-server-package
+          path: dist/safari/campus-reader-safari-server.zip
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/safari/site
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.publish.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: publish

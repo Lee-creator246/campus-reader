@@ -5,6 +5,7 @@
   ".github/pull_request_template.md": "5d320c7fbe8d46fd882390624351efb891567776c92e97045d6c6dc8e5676d7b",
   ".github/workflows/checks.yml": "cc4c3831ccc97fa3f30714cbf180e5ec0aee82da4effb8d6164d15ae7cbbcc72",
   ".github/workflows/ios.yml": "f04df680f037d398f572a990499b5c9d1b11b12e5e0a5b815fb5ee4ea9c15a0b",
+  ".github/workflows/safari-web.yml": "1782c2b8fc067c2fe181df89db2a82deec6bb273e4d891d7245ffc8acbe1ef7a",
   ".gitignore": "8e275086a2cee38a192bca3e17299c5acd06bc24d03f23edaec0e29577e414d9",
   "BUILDING.md": "72b753d6b9da2f30d0370a9bddb122e53078b626c1bdd1c8e9e1e7e8cb8c42af",
   "CHANGELOG.md": "0165d234030270b41f5413422ab36e8a3cb94a243035b1dad2e61091b8f9bca2",
@@ -259,5 +260,19 @@
   "scripts/package_source.py": "3f281b1a225f1e2ecc3b38ddec23b0f4d73dbbc11e712357b902dc75d4e3cb44",
   "scripts/score_ai_eval.py": "a78f11518bccb5d381c237d39ce87585bb90dfa98df9347fec7ae3ae4300570f",
   "settings.gradle": "8969016e3090edc442e95db4bdd95c1d4fcd53ce47f75698c64b44ce8488ec6f",
-  "vendor/README.md": "5f76f3dbdbeab511b70d30c02b280481dae667f43f79c41c1eedb1c3111116a2"
+  "vendor/README.md": "5f76f3dbdbeab511b70d30c02b280481dae667f43f79c41c1eedb1c3111116a2",
+  "web/DEPLOY.md": "9449ae192b4a40d1d05ed26fda1bd2c352a0acdeca9d0478f85318ae89bceba9",
+  "web/build.py": "ee7df1df8dbd992dc3e9e9bae2793ad032d09190ac1d7ada50e447f5f6a685fc",
+  "web/probe_portal.py": "d077462f2f5d038e9c37e82496ed3f42eac30ca11cbb95dc849c8929007eed82",
+  "web/public/data.js": "d1adbe963d2d157203025828a227613fe88b1ce946cc66c8ce4af0be39f0b821",
+  "web/public/icon.svg": "b5f37b9d4d878d6ce73027a49246d145dbf4e019c65d3158ba7bccfcbb560045",
+  "web/public/index.html": "7df6defbb5bd52b71434782f56e2291c2919b0c5b03ff2629702cd1ba43db12a",
+  "web/public/manifest.webmanifest": "02186a154ad91922a7c35c7fe6889d68eff2dbdf12e867933cef840d7a255c1a",
+  "web/public/reader.css": "7581126b4e9e01adc36a26ce21cd6adeec6abc41b9a683ac8be946891da0f1d7",
+  "web/public/reader.js": "6c1982ecd0823a28fa421216a43c5dcb8657e35e6a8181ee4751e49d404d6716",
+  "web/server/Caddyfile": "2319b0434bb30985d35faca8142e9f9771f61bc9b387bfa3f5f83b4f87e14d6e",
+  "web/server/compose.yaml": "8027b28e4088b019a43ff79e0835dd240b9d1417d5d2613e81f16e9ec4c88e6b",
+  "web/server/server.mjs": "57de9268339aadcf72bd55ac4f3ea688e8fb04ddcd269da008cf713a727e9f2c",
+  "web/tests/smoke_compose.sh": "248fb68deecb698de659f695c0bc1018aaae31bd1550bf16c1996cc1b1a5b217",
+  "web/tests/test_service.py": "8825eae8744c300eadf89c860cd73ff99cf11b6497cfc61e28089cfd4ade03e3"
 }

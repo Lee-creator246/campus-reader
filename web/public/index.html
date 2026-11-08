@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#183c68">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="referrer" content="no-referrer">
+  <title>北邮人信息 · Safari 内测</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./reader.css">
+  <script type="module" src="./reader.js"></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="mast-inner">
+      <a class="brand" href="./"><img alt="" src="./icon.svg" width="36" height="36">北邮人信息</a>
+      <a class="feedback-shortcut" href="#feedback" id="feedback-link">测试反馈 <span aria-hidden="true">↗</span></a>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="tools" aria-label="阅读来源">
+      <label for="source">阅读来源</label>
+      <select id="source">
+        <option value="demo">演示数据</option>
+        <option value="local">本机导入</option>
+        <option value="campus" hidden disabled>公开通知</option>
+      </select>
+      <p id="source-description" class="meta"></p>
+      <div id="local-tools" hidden>
+        <label class="action file-action">选择 JSON 文件<input id="import-file" type="file" accept="application/json,.json"></label>
+        <details><summary>文件格式</summary><p>UTF-8 JSON，最多 200 条、512 KiB。文件只在本浏览器内处理。</p><pre>{"notices":[{"id":"1","title":"通知标题","publishedAt":"2026-11-01","body":"正文"}]}</pre></details>
+        <button type="button" id="clear-import" class="text-button" hidden>清除本机导入</button>
+      </div>
+      <button type="button" id="refresh-campus" class="action" hidden>刷新公开通知</button>
+      <div class="portal-links">
+        <details><summary>学校信息门户</summary>
+          <p>在校园网或已授权的校园通道中访问。登录会话由学校网站管理。</p>
+          <a href="https://auth.bupt.edu.cn/authserver/login?service=http%3A%2F%2Fmy.bupt.edu.cn%3A80%2Fsystem%2Fresource%2Fcode%2Fauth%2Fclogin.jsp%3Fowner%3D1664271694" target="_blank" rel="noopener noreferrer">学校登录 ↗</a>
+          <a href="http://my.bupt.edu.cn/list.jsp?urltype=tree.TreeTempUrl&amp;wbtreeid=1154" target="_blank" rel="noopener noreferrer">门户通知列表 ↗</a>
+        </details>
+      </div>
+    </aside>
+    <main aria-label="通知阅读">
+      <p id="storage-status" class="status" role="status" hidden></p>
+      <p id="source-status" class="status" role="status" hidden></p>
+      <section id="list-view">
+        <div class="section-heading"><h1>通知</h1><span id="count" class="meta"></span></div>
+        <nav class="tabs" aria-label="筛选通知">
+          <button id="tab-all" data-tab="all">全部</button>
+          <button id="tab-unread" data-tab="unread">未读</button>
+          <button id="tab-later" data-tab="later">稍后读</button>
+        </nav>
+        <ul id="notices" aria-label="通知列表"></ul>
+        <p id="empty" class="empty" hidden></p>
+      </section>
+      <section id="detail-view" hidden>
+        <button id="back-button" class="back" type="button">← 返回列表</button>
+        <article>
+          <div class="article-meta"><span id="detail-source"></span><time id="detail-date"></time></div>
+          <h1 id="detail-title" tabindex="-1"></h1>
+          <div class="actions">
+            <button id="detail-later" class="action"></button>
+            <button id="mark-unread" class="action"></button>
+          </div>
+          <div id="detail-body" class="body-text"></div>
+          <a id="original" hidden target="_blank" rel="noopener noreferrer">在门户查看原文 ↗</a>
+        </article>
+      </section>
+    </main>
+    <footer>
+      <details id="feedback">
+        <summary>测试反馈</summary>
+        <label for="feedback-message">你做了什么？实际看到了什么？</label>
+        <textarea id="feedback-message" maxlength="600" rows="4" placeholder="请勿填写账号、密码或粘贴真实校内通知。"></textarea>
+        <p id="feedback-policy" class="meta"></p>
+        <div class="actions">
+          <button id="send-feedback" class="action"></button>
+          <button id="copy-feedback" class="action">复制反馈</button>
+        </div>
+        <p id="feedback-status" role="status"></p>
+      </details>
+      <div class="footer-line"><span id="build-version">Safari 内测</span><span>Safari 分享菜单 → 添加到主屏幕</span></div>
+    </footer>
+  </div>
+  <noscript>请开启浏览器 JavaScript 以查看和筛选通知。</noscript>
+</body>
+</html>

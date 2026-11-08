@@ -1,0 +1,18 @@
+{$CAMPUS_DOMAIN} {
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        X-Frame-Options DENY
+    }
+    handle /api/* {
+        request_body {
+            max_size 4KB
+        }
+        reverse_proxy api:8080
+    }
+    handle {
+        root * /srv
+        header Cache-Control "no-cache"
+        file_server
+    }
+}

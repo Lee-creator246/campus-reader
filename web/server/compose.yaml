@@ -1,0 +1,32 @@
+name: campus-reader-safari
+services:
+  api:
+    image: node:22-alpine
+    command: ["node", "/app/server.mjs"]
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    restart: unless-stopped
+    mem_limit: 128m
+    volumes:
+      - ./server.mjs:/app/server.mjs:ro
+      - ./data:/data:ro
+      - feedback:/state
+    environment:
+      PUBLIC_ORIGIN: https://${CAMPUS_DOMAIN:?set your HTTPS domain}
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    mem_limit: 128m
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./site:/srv:ro
+      - tls:/data
+      - config:/config
+    environment:
+      CAMPUS_DOMAIN: ${CAMPUS_DOMAIN:?set your HTTPS domain}
+volumes:
+  tls:
+  config:
+  feedback:
