@@ -76,7 +76,14 @@ struct PortalLoginView: View {
             if !password.isEmpty {
                 guard password.count <= 1024 else { message = "密码过长，请检查输入"; password = ""; return }
                 credential = PortalCredential(account: service.activeAccount, password: password, binding: "https://auth.bupt.edu.cn/authserver/login")
-            } else { credential = try service.savedCredential() }
+            } else {
+                do { credential = try service.savedCredential() }
+                catch let failure as KeychainStore.Failure {
+                    message = failure.localizedDescription
+                    if automatic { return }
+                    // The web login can proceed without a stored password.
+                }
+            }
             password = ""
             if automatic && credential == nil { message = "门户需要重新登录，请输入密码。"; return }
             if automatic { service.noteAutomaticAttempt() }

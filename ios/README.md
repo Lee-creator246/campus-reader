@@ -39,6 +39,24 @@ xcodebuild -project ios/CampusReader.xcodeproj -scheme CampusReader \
 
 GitHub Actions 的 `ios-build-evidence` 会归档已生成的文件。判断一次提交是否通过验证，请核对核心测试、真机目标编译、模拟器测试各自的结果。可在 Mac 上用 Xcode 打开 `Tests.xcresult` 查看失败步骤与测试截图。
 
+### 本人 iPhone 的免费安装与复验
+
+GitHub Actions 使用 XcodeGen 生成 SwiftUI 工程，SwiftPM 拉取 SwiftSoup 2.9.6。真机 Release 编译目标为 `generic/platform=iOS`，签名设置为 `CODE_SIGNING_ALLOWED=NO`。新版工作流将 `CampusReader-needs-signing.ipa`、`device-audit.json` 和 `device-build.log` 放入 `ios-build-evidence` 的 `build/delivery/`。报告包含版本、提交、SHA-256、Mach-O 平台、签名命令和描述文件存在性。构建日志与项目、测试产物在同一运行中归档。
+
+在 Windows 或 macOS 上可以复核下载的 IPA。程序用主可执行文件的 `LC_BUILD_VERSION` 区分 iOS（2）与模拟器（7），再与 Info.plist 核对。报告里的签名团队、失效时间和授权设备若为 null，表示没有证据，无法确认。对已重新签名的文件，必须另用 Apple 的签名工具和描述文件验证证书、entitlements 与设备列表。
+
+```sh
+python ios/scripts/inspect_app.py CampusReader-needs-signing.ipa --platform iphoneos
+```
+
+**有可配对的 Mac**。在 Xcode 设置中登录个人 Apple 账号。在 `ios/` 运行 `bash scripts/build.sh` 以生成工程，打开生成的 `CampusReader.xcodeproj`。选择 CampusReader target → Signing & Capabilities，启用自动签名，选择 Personal Team，设置本人可用且唯一的 Bundle ID。连接并信任已解锁 iPhone，按提示开启开发者模式，选择这部手机作为运行目标并点 Run。个人描述文件自签发起有效 7 天，到期重新构建安装，使用相同团队与标识更新。[Apple 真机运行](https://developer.apple.com/documentation/xcode/running-your-app-on-simulated-or-physical-devices) · [免费团队的设备与有效期限制](https://developer.apple.com/help/account/basics/about-your-developer-account)
+
+**只有 Windows**。本 IPA 的 App 最低支持 iOS 16；使用 AltStore Classic 2.3 安装时，手机需要 iOS 17.4 或更高。依官方指南准备 Windows 版 AltServer、iTunes、iCloud，使用可传数据的 USB 线连接已解锁手机并信任电脑，在 iTunes 开启 Wi-Fi 同步。用 AltServer 的 Install AltStore 为该手机安装工具，账号与二次验证由本人输入。根据手机提示信任个人开发者，在“设置 → 隐私与安全性 → 开发者模式”开启、重启并确认。把待签名 IPA 保存到 iPhone 的“文件”，从 AltStore 的 My Apps 安装。测试者应记录真实手机启动结果。免费账户安装的应用每 7 天需刷新，常规方式是在 AltServer 可连接时刷新。用于更新的账号、Bundle ID 和签名团队应保持一致，否则 iOS 可能视为另一款 App，资料与钥匙串也可能使用新的隔离空间。[Windows 安装指南](https://faq.altstore.io/altstore-classic/how-to-install-altstore-windows) · [2.3 系统要求](https://github.com/altstoreio/AltStore/releases/tag/v2.3) · [刷新方法](https://faq.altstore.io/altstore-classic/your-altstore)
+
+**权限和首次进入**。App 使用系统分配的私有钥匙串保存会话、可选门户密码和 AI Key。重签后须实际验证首次登录、退出重开与会话恢复；遇到“当前签名缺少钥匙串访问权限”时，检查签名与描述文件的应用标识和团队。系统可能在首次校园网访问、开启本地通知、保存图片时分别询问授权。后台刷新受系统安排。门户使用 my.bupt.edu.cn 的受限 HTTP 例外与 HTTPS CAS 网页回跳；IPA 没有发布 APNs 或内嵌 VPN 的授权。
+
+**发下一版与回退**。在 `ios/project.yml` 增加构建号，提交到受 iOS 工作流监控的分支，或在对应分支手动运行工作流。等待核心测试、真机编译、服务测试与 UI 测试，保存 `ios-build-evidence` 与报告中的提交号。用同一账号在自己的手机上重签新 IPA 并覆盖安装。需要回退时，选择已验证的旧提交再构建，用同一 Bundle ID 和团队签名；若系统拒绝覆盖较高构建号，从旧源码提高构建号再签。涉及存储格式修改时要先确认旧版能读取已有数据，卸载会清除沙盒。
+
 ## 给同学的真机验证步骤
 
 拿到签名版本后，先用校园 Wi-Fi 测试登录和首次刷新，再测试校园网以外的行为。每项记录 App 构建号、iOS 版本、网络环境、页面提示和实际结果。反馈中的截图请遮住学工号、私人通知、验证码及密钥。

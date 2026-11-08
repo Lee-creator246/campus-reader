@@ -14,7 +14,7 @@ concurrency:
 jobs:
   ios:
     runs-on: macos-15-intel
-    timeout-minutes: 45
+    timeout-minutes: 55
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
@@ -31,7 +31,17 @@ jobs:
       - name: Core regression tests
         run: swift test --package-path ios/CampusReaderCore
       - name: Build unsigned iPhone application
-        run: bash ios/scripts/build.sh
+        run: |
+          set -o pipefail
+          mkdir -p ios/build/delivery
+          bash ios/scripts/build.sh 2>&1 | tee ios/build/delivery/device-build.log
+      - name: Package and inspect the unsigned device IPA
+        run: |
+          delivery=ios/build/delivery
+          ditto -c -k --sequesterRsrc --keepParent ios/build/device/Build/Products/Release-iphoneos/CampusReader.app "$delivery/CampusReader-iOS-unsigned.app.zip"
+          python3 ios/scripts/inspect_app.py "$delivery/CampusReader-iOS-unsigned.app.zip" --platform iphoneos \
+            --make-ipa "$delivery/CampusReader-needs-signing.ipa" --report "$delivery/device-audit.json" \
+            --commit "$GITHUB_SHA" --run "$GITHUB_RUN_ID"
       - name: Start a compatible iPhone simulator
         run: |
           python3 ios/scripts/select_simulator.py > /tmp/campus-simulator-id
@@ -39,7 +49,7 @@ jobs:
           xcrun simctl boot "$DEVICE" || true
           xcrun simctl bootstatus "$DEVICE" -b
       - name: Simulator integration tests
-        timeout-minutes: 15
+        timeout-minutes: 20
         run: |
           DEVICE=$(cat /tmp/campus-simulator-id)
           xcodebuild -project ios/CampusReader.xcodeproj -scheme CampusReader -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -parallel-testing-enabled NO -derivedDataPath ios/build/simulator -resultBundlePath ios/build/Services.xcresult -only-testing:CampusReaderTests CODE_SIGNING_ALLOWED=NO test
@@ -52,11 +62,10 @@ jobs:
         if: always()
         run: |
           mkdir -p ios/build/delivery
-          if [ -d ios/build/device/Build/Products/Release-iphoneos/CampusReader.app ]; then
-            ditto -c -k --sequesterRsrc --keepParent ios/build/device/Build/Products/Release-iphoneos/CampusReader.app ios/build/delivery/CampusReader-iOS-unsigned.app.zip
-          fi
           if [ -d ios/build/simulator/Build/Products/Debug-iphonesimulator/CampusReader.app ]; then
             ditto -c -k --sequesterRsrc --keepParent ios/build/simulator/Build/Products/Debug-iphonesimulator/CampusReader.app ios/build/delivery/CampusReader-iOS-simulator.app.zip
+            python3 ios/scripts/inspect_app.py ios/build/delivery/CampusReader-iOS-simulator.app.zip --platform iphonesimulator \
+              --commit "$GITHUB_SHA" --run "$GITHUB_RUN_ID" --report ios/build/delivery/simulator-audit.json
           fi
           if [ -d ios/CampusReader.xcodeproj ]; then
             ditto -c -k --keepParent ios/CampusReader.xcodeproj ios/build/delivery/CampusReader.xcodeproj.zip

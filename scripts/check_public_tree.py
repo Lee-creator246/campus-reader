@@ -3,7 +3,7 @@ from pathlib import Path
 import os,re,subprocess,sys,hashlib
 ROOT=Path(__file__).resolve().parents[1]
 ROOT_FILES={'settings.gradle','build.gradle','gradle.properties','gradlew','gradlew.bat','LICENSE','README.md','BUILDING.md','THIRD_PARTY_NOTICES.md','CONTRIBUTING.md','SECURITY.md','CHANGELOG.md','.gitignore','.gitattributes','.editorconfig','SOURCE_MANIFEST.json'}
-DIRS={'campus-config','app','campus-auth','campus-extension','campus-portal','checks','gradle','docs','scripts','licenses','vendor','.github','ios'}
+DIRS={'campus-config','app','campus-auth','campus-extension','campus-portal','checks','gradle','docs','scripts','licenses','vendor','.github','ios','web'}
 GENERATED={'build','.gradle','.git','dist','__pycache__','.build','DerivedData','xcuserdata','CampusReader.xcodeproj'}
 WRAPPER='gradle/wrapper/gradle-wrapper.jar'
 DENIED_EXT={'.apk','.aab','.xapk','.aar','.so','.dex','.zip','.jks','.keystore','.key','.pem','.p12','.pfx','.db','.sqlite','.sqlite3','.png','.jpg','.jpeg','.log','.pyc','.ipa','.mobileprovision','.provisionprofile'}

@@ -5,7 +5,16 @@ enum KeychainStore {
     private static let service = "org.campusreader.ios.credentials"
     struct Failure: LocalizedError {
         let status: OSStatus
-        var errorDescription: String? { "系统安全存储暂不可用，请解锁手机后重试。" }
+        var errorDescription: String? {
+            switch status {
+            case errSecInteractionNotAllowed:
+                return "钥匙串暂不可访问，请解锁设备后重试。"
+            case errSecMissingEntitlement:
+                return "当前签名缺少钥匙串访问权限，请检查个人签名和描述文件。"
+            default:
+                return "钥匙串操作失败（系统状态码 \(status)）。"
+            }
+        }
     }
     static func read(_ key: String) throws -> Data? {
         var query = identity(key)

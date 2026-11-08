@@ -121,11 +121,13 @@ final class PortalService: ObservableObject {
     init(transport: PortalTransport = PortalHTTPClient()) { self.transport = transport }
 
     func restore() async {
-        guard !restored else { return }
+        guard !restored, !hasAccount else { return }
         restored = true
         guard !UserDefaults.standard.bool(forKey: "portal-logout-pending") else { return }
         do {
-            guard let data = try KeychainStore.read(sessionKey) else { return }
+            let data = try KeychainStore.read(sessionKey)
+            storageMessage = ""
+            guard let data else { return }
             let saved = try JSONDecoder().decode(SavedSession.self, from: data)
             guard validAccount(saved.account), saved.cookies.count <= 128 else { throw PortalError.invalidResponse("本机会话格式已变化") }
             try await selectAccount(saved.account)
@@ -138,9 +140,11 @@ final class PortalService: ObservableObject {
             guard owner == generation else { return }
             canReadCachedAccount = true
             sessionState = .loginRequired // A saved cookie is not authentication proof.
+        } catch let failure as KeychainStore.Failure {
+            storageMessage = failure.localizedDescription
+            restored = false
         } catch {
-            storageMessage = "本机登录信息暂时无法读取，请解锁后重试；缓存未删除。"
-            restored = false // Locked keychain must remain retryable.
+            storageMessage = "保存的门户会话暂时无法恢复，请重新登录。"
         }
     }
 
@@ -208,7 +212,7 @@ final class PortalService: ObservableObject {
             else { page = try PortalParser.parseList(url: url, status: result.response.statusCode, html: result.text) }
             sessionState = .authenticated
             canReadCachedAccount = true
-            try saveSession()
+            saveSession()
             return page
         } catch { recordFailure(error, owner: owner); throw error }
     }
@@ -366,19 +370,25 @@ final class PortalService: ObservableObject {
     private func validAccount(_ input: String) -> Bool {
         !input.isEmpty && input.count <= 128 && !input.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
     }
-    private func saveSession() throws {
+    private func saveSession() {
         let saved = SavedSession(account: activeAccount, cookies: jar.cookies.map(SavedCookie.init))
-        do { try KeychainStore.write(JSONEncoder().encode(saved), key: sessionKey); UserDefaults.standard.removeObject(forKey: "portal-logout-pending") }
-        catch { storageMessage = "门户可访问，但会话暂未保存。解锁后刷新可重试。" }
+        do {
+            try KeychainStore.write(JSONEncoder().encode(saved), key: sessionKey)
+            UserDefaults.standard.removeObject(forKey: "portal-logout-pending")
+            storageMessage = ""
+        } catch {
+            storageMessage = "门户可访问，本次会话未保存。\(error.localizedDescription)"
+        }
     }
     private struct SavedSession: Codable { let account: String; let cookies: [SavedCookie] }
-    private struct SavedCookie: Codable {
+    struct SavedCookie: Codable {
         let name: String, value: String, domain: String, path: String
         let secure: Bool, httpOnly: Bool
         let expires: Date?
         init(_ cookie: HTTPCookie) { name = cookie.name; value = cookie.value; domain = cookie.domain; path = cookie.path; secure = cookie.isSecure; httpOnly = cookie.isHTTPOnly; expires = cookie.expiresDate }
         var cookie: HTTPCookie? {
-            var properties: [HTTPCookiePropertyKey: Any] = [.name:name,.value:value,.domain:domain,.path:path,.secure:secure ? "TRUE" : "FALSE"]
+            var properties: [HTTPCookiePropertyKey: Any] = [.name:name,.value:value,.domain:domain,.path:path]
+            if secure { properties[.secure] = "TRUE" }
             if httpOnly { properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE" }
             if let expires { properties[.expires] = expires }
             return HTTPCookie(properties: properties)

@@ -92,6 +92,21 @@ final class PortalServiceTests: XCTestCase {
         XCTAssertEqual(PortalConfiguration.notices.path, "/list.jsp")
         XCTAssertTrue(PortalConfiguration.notices.query?.contains("wbtreeid=1154") == true)
     }
+    func testRestoredCookiePreservesPortalHTTPAndHTTPSBoundary() throws {
+        for secure in [false, true] {
+            var properties: [HTTPCookiePropertyKey: Any] = [
+                .name: "synthetic", .value: "test", .domain: "my.bupt.edu.cn", .path: "/"
+            ]
+            if secure { properties[.secure] = "TRUE" }
+            let cookie = try XCTUnwrap(HTTPCookie(properties: properties))
+            let data = try JSONEncoder().encode(PortalService.SavedCookie(cookie))
+            let restored = try XCTUnwrap(JSONDecoder().decode(PortalService.SavedCookie.self, from: data).cookie)
+            var jar = PortalCookieJar()
+            jar.set(restored)
+            XCTAssertEqual(restored.isSecure, secure)
+            XCTAssertEqual(jar.header(for: PortalConfiguration.notices) != nil, !secure)
+        }
+    }
     func testForgedPaginationIsRejectedBeforeAnyRequest() async {
         let mock = MockPortalTransport()
         mock.handler = { request in XCTFail("Unvalidated pagination must never reach transport"); return Self.response(request, status: 200) }
