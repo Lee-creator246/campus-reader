@@ -1,0 +1,68 @@
+name: iPhone Simulator Mobile Safari reading test
+on:
+  push:
+    branches: [main]
+    paths: ['web/**', '.github/workflows/safari-simulator.yml', 'ios/scripts/select_simulator.py']
+  pull_request:
+    paths: ['web/**', '.github/workflows/safari-simulator.yml', 'ios/scripts/select_simulator.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mobile-safari:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build the same static reader used by the HTTPS site
+        run: |
+          python3 web/build.py --output "$RUNNER_TEMP/web-output"
+          mkdir -p "$RUNNER_TEMP/reader-http/campus-reader" safari-evidence
+          cp -R "$RUNNER_TEMP/web-output/site/." "$RUNNER_TEMP/reader-http/campus-reader/"
+          cp "$RUNNER_TEMP/web-output/site/version.json" safari-evidence/version.json
+          command -v xcodegen >/dev/null || brew install xcodegen
+          xcodegen generate --spec web/safari-tests/project.yml
+      - name: Boot a compatible iPhone simulator
+        run: |
+          DEVICE=$(python3 ios/scripts/select_simulator.py)
+          echo "TEST_DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          {
+            echo "environment=iPhone Simulator / Mobile Safari"
+            echo "fixture=local HTTP static site with synthetic data"
+            echo "commit=$GITHUB_SHA"
+            echo "run=$GITHUB_RUN_ID"
+            xcodebuild -version
+            xcrun simctl list devices booted
+          } > safari-evidence/environment.txt
+      - name: Test list, detail and return inside Mobile Safari
+        timeout-minutes: 19
+        run: |
+          set -eo pipefail
+          python3 -m http.server 18765 --bind 127.0.0.1 --directory "$RUNNER_TEMP/reader-http" > safari-evidence/http.log 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          curl --fail --silent --show-error --retry 8 --retry-connrefused http://127.0.0.1:18765/campus-reader/version.json
+          xcrun simctl openurl "$TEST_DEVICE" http://127.0.0.1:18765/campus-reader/
+          xcodebuild -project web/safari-tests/SafariReaderSmoke.xcodeproj -scheme SafariReaderSmoke \
+            -destination "platform=iOS Simulator,id=$TEST_DEVICE" -parallel-testing-enabled NO \
+            -derivedDataPath "$RUNNER_TEMP/safari-derived" -resultBundlePath safari-evidence/Tests.xcresult \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 180 -maximum-test-execution-time-allowance 240 \
+            CODE_SIGNING_ALLOWED=NO test 2>&1 | tee safari-evidence/test.log
+      - name: Export Safari screenshots and test results
+        if: always()
+        run: |
+          if [ -d safari-evidence/Tests.xcresult ]; then
+            xcrun xcresulttool export attachments --path safari-evidence/Tests.xcresult --output-path safari-evidence/screenshots || true
+          fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: iphone-simulator-safari-evidence
+          path: safari-evidence/
+          retention-days: 14
