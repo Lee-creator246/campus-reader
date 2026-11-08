@@ -46,6 +46,11 @@ export function holdToPreview(anchor, preview, open) {
   });
   for (const name of ["pointerup", "pointercancel", "pointerleave"]) anchor.addEventListener(name, cancel);
   anchor.addEventListener("contextmenu", event => { event.preventDefault(); show(); });
+  // A modal opened during a touch hold can receive the compatibility click on release,
+  // even though the touch began on this link. Cancel that click at its touch source.
+  anchor.addEventListener("touchend", event => {
+    if (held && event.cancelable) event.preventDefault();
+  }, {passive: false});
   anchor.addEventListener("click", event => {
     if (held) { event.preventDefault(); held = false; return; }
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -59,10 +64,18 @@ export function activateDialog(dialog, focus) {
   if (focus) focus.focus();
 }
 export function dismissOnBackdrop(dialog) {
-  dialog.addEventListener("click", event => {
-    if (event.target !== dialog) return;
+  let pressedOutside = false;
+  function outside(event) {
     const rect = dialog.getBoundingClientRect();
-    if (event.clientX < rect.left || event.clientX > rect.right ||
-        event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
+    return event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right ||
+      event.clientY < rect.top || event.clientY > rect.bottom);
+  }
+  dialog.addEventListener("pointerdown", event => { pressedOutside = outside(event); });
+  dialog.addEventListener("pointercancel", () => { pressedOutside = false; });
+  dialog.addEventListener("close", () => { pressedOutside = false; });
+  dialog.addEventListener("click", event => {
+    const dismiss = pressedOutside && outside(event);
+    pressedOutside = false;
+    if (dismiss) dialog.close();
   });
 }
