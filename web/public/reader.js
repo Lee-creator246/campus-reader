@@ -1,4 +1,5 @@
 import { Library, MAX_BYTES, SOURCE_NAMES, noticesFrom } from "./data.js";
+import { setupPush } from "./push.js";
 
 const $ = id => document.getElementById(id);
 const library = new Library();
@@ -269,5 +270,6 @@ async function start() {
     "GitHub 反馈公开可见。你可以先预览再发布，或复制给维护者。";
   $("send-feedback").textContent = server ? "提交给维护者" : "前往 GitHub 预览";
   render();
+  if (server) setupPush();
 }
 start();

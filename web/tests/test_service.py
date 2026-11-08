@@ -15,6 +15,9 @@ import probe_portal
 
 
 class ProbeTests(unittest.TestCase):
+    def test_push_protocol_and_delivery_state(self):
+        subprocess.run(['node', '--test', str(HERE / 'tests/push.test.mjs')], check=True)
+
     def test_portal_and_third_party_links_are_distinguished(self):
         parser = probe_portal.NoticeList(probe_portal.NOTICES)
         parser.feed('<a href="https://other.example/xntz_content.jsp?wbnewsid=99">x</a>'
@@ -92,6 +95,21 @@ class ServiceTests(unittest.TestCase):
         record = json.loads((self.root/'feedback.ndjson').read_text(encoding='utf8'))
         self.assertEqual(record['message'], sample['message'])
         self.assertEqual(set(record), {'date','message','version','commit'})
+
+    def test_anonymous_subscription_api_has_no_broadcast_or_listing(self):
+        status, config = self.fetch('/api/push/config')
+        self.assertEqual(status,200)
+        self.assertTrue(config['enabled'])
+        self.assertRegex(config['publicKey'], r'^[\w-]{87}$')
+        sub = {'endpoint':'https://web.push.apple.com/synthetic_local_fixture','token':'d'*64}
+        self.assertEqual(self.fetch('/api/push/subscribe',sub)[0],403)
+        self.assertEqual(self.fetch('/api/push/subscribe',sub,self.url)[0],201)
+        self.assertEqual(self.fetch('/api/push/subscribe',sub,self.url)[0],200)
+        self.assertEqual(self.fetch('/api/push/subscribe')[0],404)
+        self.assertEqual(self.fetch('/api/push/broadcast',sub,self.url)[0],404)
+        self.assertEqual(self.fetch('/api/push/test',{**sub,'token':'e'*64},self.url)[0],403)
+        self.assertEqual(self.fetch('/api/push/unsubscribe',sub,self.url)[0],200)
+        self.assertEqual(self.fetch('/api/push/test',sub,self.url)[0],410)
 
 
 if __name__ == '__main__':

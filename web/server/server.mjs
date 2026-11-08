@@ -2,6 +2,7 @@ import http from 'node:http';
 import { constants } from 'node:fs';
 import { mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
+import { PushRegistry } from './push.mjs';
 
 const origin = new URL(process.env.PUBLIC_ORIGIN).origin;
 const state = process.env.STATE_DIR || '/state';
@@ -81,22 +82,25 @@ async function readPublicFeed() {
     }
 }
 
-async function parseFeedback(req) {
+async function parseJSON(req) {
     if (req.headers.origin !== origin) throw fail(403, 'wrong_origin');
     if (req.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') {
         throw fail(415, 'json_required');
     }
-    if (Number(req.headers['content-length']) > byteLimit) throw fail(413, 'feedback_too_large');
+    if (Number(req.headers['content-length']) > byteLimit) throw fail(413, 'request_too_large');
     let size = 0;
     const chunks = [];
     for await (const chunk of req) {
         size += chunk.length;
-        if (size > byteLimit) throw fail(413, 'feedback_too_large');
+        if (size > byteLimit) throw fail(413, 'request_too_large');
         chunks.push(chunk);
     }
-    let input;
-    try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
-    catch { throw fail(400, 'invalid_feedback'); }
+    try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+    catch { throw fail(400, 'invalid_json'); }
+}
+
+async function parseFeedback(req) {
+    const input = await parseJSON(req);
     if (!input || !plainString(input.message, 600) || !plainString(input.version, 32) ||
         !plainString(input.commit, 40) || !/^[a-f\d]{7,40}$/i.test(input.commit) ||
         Object.keys(input).some(k => !['message', 'version', 'commit'].includes(k))) {
@@ -104,6 +108,30 @@ async function parseFeedback(req) {
     }
     return { date: new Date().toISOString(), message: input.message.trim(), version: input.version, commit: input.commit };
 }
+
+const push = await PushRegistry.open(state, origin).catch(() => {
+    console.error('Push configuration unavailable: check the private state directory.');
+    return null;
+});
+let scanning = false;
+async function checkPublicUpdates() {
+    if (!push || scanning) return;
+    scanning = true;
+    try {
+        let notices;
+        try { ({notices} = await readPublicFeed()); }
+        catch (err) {
+            if (err.code !== 'public_feed_not_configured') throw err;
+            notices = [];
+        }
+        const counts = await push.scan(notices);
+        if (Object.values(counts).some(Boolean)) console.log('Public push batch', counts);
+    } catch (err) { console.error('Public push scan failed:', err.status ? err.code : 'internal_error'); }
+    finally { scanning = false; }
+}
+await checkPublicUpdates();
+setInterval(checkPublicUpdates, 60_000).unref();
+if (process.platform !== 'win32') process.on('SIGUSR2', checkPublicUpdates);
 
 let writes = Promise.resolve();
 let queued = 0;
@@ -133,6 +161,18 @@ const api = http.createServer({
     requestTimeout: 15_000, headersTimeout: 10_000, maxHeaderSize: 8192,
 }, async (req, res) => {
     try {
+        if (req.method === 'GET' && req.url === '/api/push/config') {
+            if (!push) throw fail(503, 'push_unavailable');
+            return send(res, 200, push.config);
+        }
+        if (req.method === 'POST' && ['/api/push/subscribe', '/api/push/unsubscribe', '/api/push/test'].includes(req.url)) {
+            if (!push) throw fail(503, 'push_unavailable');
+            const input = await parseJSON(req);
+            if (req.url === '/api/push/test') return send(res, 200, await push.test(input));
+            if (req.url === '/api/push/subscribe') return send(res, await push.subscribe(input) ? 201 : 200, {ok:true});
+            await push.unsubscribe(input);
+            return send(res, 200, {ok:true});
+        }
         if (req.method === 'GET' && req.url === '/api/notices') return send(res, 200, await readPublicFeed());
         if (req.method === 'POST' && req.url === '/api/feedback') {
             await saveFeedback(await parseFeedback(req));

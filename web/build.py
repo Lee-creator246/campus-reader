@@ -56,7 +56,7 @@ def build(output):
         target.write_bytes(data)
     archive_files = {"site/" + k: v for k, v in files.items()}
     archive_files["site/version.json"] = metadata("server")
-    for name in ("Caddyfile", "compose.yaml", "server.mjs"):
+    for name in ("Caddyfile", "compose.yaml", "server.mjs", "push.mjs"):
         archive_files[name] = (HERE / "server" / name).read_bytes()
     for name in ("probe_portal.py", "DEPLOY.md"):
         archive_files[name] = (HERE / name).read_bytes()

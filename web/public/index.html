@@ -34,6 +34,17 @@
         <button type="button" id="clear-import" class="text-button" hidden>清除本机导入</button>
       </div>
       <button type="button" id="refresh-campus" class="action" hidden>刷新公开通知</button>
+      <details id="push-settings" hidden>
+        <summary>手机提醒</summary>
+        <p>订阅公开通知更新或发送一条测试提醒。开启后，此站点会保存本机的推送订阅地址。</p>
+        <p id="push-status" role="status"></p>
+        <div class="actions">
+          <button type="button" id="push-enable" class="action" hidden>开启提醒</button>
+          <button type="button" id="push-test" class="action" hidden>发送测试提醒</button>
+          <button type="button" id="push-disable" class="action" hidden>取消订阅</button>
+          <button type="button" id="push-retry" class="action" hidden>重新检查</button>
+        </div>
+      </details>
       <div class="portal-links">
         <details><summary>学校信息门户</summary>
           <p>在校园网或已授权的校园通道中访问。登录会话由学校网站管理。</p>

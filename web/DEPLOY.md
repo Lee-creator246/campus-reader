@@ -70,6 +70,18 @@ python web/build.py --output dist/safari
 
 服务仅接受和网页同源的小型 JSON 反馈，有请求大小、并发、每日、每月和总文件容量限制。换域名时同步修改 `CAMPUS_DOMAIN`。公开 GitHub Pages 上的反馈使用 GitHub 账户与 Issues，由用户自己决定是否公开提交。
 
+## 服务器版公开通知提醒
+
+无需校园账号。iPhone 用户使用支持 Web Push 的系统（iOS 16.4 及以上），将 HTTPS 网页添加到主屏幕，从该图标打开，点击页面上的订阅按钮并允许系统通知。GitHub Pages 静态版本没有推送服务接口。[WebKit 官方说明](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)
+
+服务器首次启动在私有状态目录生成 VAPID 密钥。Compose 使用持久卷 `/state`，systemd 使用 `/var/lib/campus-reader-safari-api`。严禁托管或提交 `push-state.json` 及临时副本；它们包含 VAPID 私钥、设备推送地址和管理凭证摘要。备份按私有凭据保存，更新或回退代码时继续使用同一目录。公钥可以从 `GET /api/push/config` 取得。私有状态损坏时推送 API 返回 503；先检查目录、权限及备份，避免静默换钥匙使所有设备失效。
+
+订阅/取消/测试需要同源 JSON 请求及该安装随机生成的管理 token，不提供匿名广播接口。测试提醒只有推送服务接受后返回 `accepted:true`；本人还需在设备上确认收到提醒，点开后回到当前站点。推送消息没有正文或个人数据，服务只对接固定的 Apple、Chrome 和 Firefox 推送主机，拒绝跳转到其他地址。网关 404 或 410 的订阅会自动清理。每个设备两次测试至少间隔一分钟，24 小时最多 4 次，Beta 服务最多 64 个订阅。
+
+投放一条新的公开通知时，按上一节审核并原子替换 `public-notices.json`。服务每分钟检查一次，按稳定 ID 去重，同批新增合并为一次通用提醒。首次启用时已有通知只建立基线。若需立即检查公开 feed，维护者可执行 `docker compose kill -s SIGUSR2 api`，systemd 部署则使用 `systemctl kill --kill-whom=main --signal=SIGUSR2 campus-reader-safari-api`。服务日志只显示各推送结果的数量。两次群发至少相隔两分钟。
+
+每个当时已订阅的设备最多有一条持久待发提醒；后续新通知合并。网络超时、网关 429 或 5xx 时仅重试尚未成功的设备；退避 1 分钟、5 分钟、30 分钟、2 小时，尊重限流服务返回的 `Retry-After`，单批至多尝试 5 次，最长 24 小时。服务重启继续剩余任务，网关接受或永久拒绝后清理；退订会删除对应待发任务，之后加入的设备不补收旧批次。网关已接收但服务在保存回执前意外中断时，重试可能重复。最多保留 20,000 个已处理 ID 的摘要，达到容量时需维护者安排账本迁移。
+
 ## 更新与回退
 
 将下一版 ZIP 解压至新的版本目录，沿用相同域名与 Compose 项目名，从新目录运行 `docker compose up -d --force-recreate`。核对 HTTPS `version.json` 的提交 ID。需要回退时在保留的旧版本目录执行同一条启动命令并核对版本；沿用现有证书卷与反馈卷。若启用了公开 feed，将同一份经审核的数据放在对应版本目录的 `data/` 下。GitHub Pages 版本则对目标提交重跑发布流程并以公开地址的 `version.json` 核对生效版本。

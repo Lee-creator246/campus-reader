@@ -10,6 +10,7 @@ services:
     mem_limit: 128m
     volumes:
       - ./server.mjs:/app/server.mjs:ro
+      - ./push.mjs:/app/push.mjs:ro
       - ./data:/data:ro
       - feedback:/state
     environment:

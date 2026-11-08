@@ -34,4 +34,6 @@ status=$(curl --cacert ca.crt --silent -o feedback.json -w '%{http_code}' -H 'Or
 test "$status" = "201"
 python3 -c 'import json; assert json.load(open("feedback.json"))["ok"]'
 test "$(curl --cacert ca.crt --silent -o /dev/null -w '%{http_code}' https://localhost/api/feedback)" = "404"
-echo 'Local HTTPS, site, public notice API and write-only feedback passed.'
+curl --cacert ca.crt --fail --silent https://localhost/api/push/config > push.json
+python3 -c 'import json; m=json.load(open("push.json")); assert m["enabled"] and len(m["publicKey"])==87'
+echo 'Local HTTPS, site, public notices, private feedback and Web Push configuration passed.'

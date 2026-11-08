@@ -48,3 +48,7 @@ campus.local.properties
 *.xcarchive/
 ios/CampusReader.xcodeproj/
 ios/CampusReader/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+web/safari-tests/SafariReaderSmoke.xcodeproj/
+push-state.json*
+feedback.ndjson
+public-notices.json

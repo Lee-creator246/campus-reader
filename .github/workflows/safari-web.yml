@@ -19,6 +19,8 @@ jobs:
           persist-credentials: false
       - name: Test service and portal probe
         run: python -m unittest discover -s web/tests -p 'test_*.py'
+      - name: Test notification subscription and delivery behavior
+        run: node --test web/tests/*.test.mjs
       - name: Build site and server archive
         run: python web/build.py --output dist/safari
       - name: Verify HTTPS server package on loopback
