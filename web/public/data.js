@@ -32,6 +32,16 @@ function schoolArticleURL(value) {
   return url.href;
 }
 
+export function safeImage(value) {
+  if (typeof value !== "string" || value.length > 2048 || !value.startsWith("https://") ||
+      /[\s\\?#\u0000-\u001f\u007f-\u009f]/.test(value)) return "";
+  try {
+    const url = new URL(value);
+    if (url.hostname === "my.bupt.edu.cn" && !url.port && !url.username && !url.password) return url.href;
+  } catch { /* An invalid thumbnail never invalidates a text notice. */ }
+  return "";
+}
+
 export function noticesFrom(payload) {
   if (!payload || !Array.isArray(payload.notices) || payload.notices.length > 200) {
     throw new Error("需要 notices 数组，最多 200 条");
@@ -42,12 +52,13 @@ export function noticesFrom(payload) {
       if (!entry || typeof entry !== "object") throw new Error("记录无效");
       const id = requiredString(entry.id, 160, "编号");
       if (/[\u0000-\u001f]/.test(id)) throw new Error("编号包含控制字符");
+      try { encodeURIComponent(id); } catch { throw new Error("编号包含无效字符"); }
       const title = requiredString(entry.title, 500, "标题");
       const publishedAt = requiredString(entry.publishedAt, 40, "日期");
       if (!/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?$/.test(publishedAt) ||
           !Number.isFinite(Date.parse(publishedAt))) throw new Error("日期须采用 ISO 8601 格式");
       if (typeof entry.body !== "string" || entry.body.length > 160000) throw new Error("正文格式有误");
-      const row = {id, title, publishedAt, body: entry.body, url: schoolArticleURL(entry.url)};
+      const row = {id, title, publishedAt, body: entry.body, url: schoolArticleURL(entry.url), image: safeImage(entry.image)};
       items.set(id, row);
     } catch (error) { throw new Error("第 " + (index + 1) + " 条：" + error.message); }
   });
@@ -99,6 +110,11 @@ export class Library {
   }
   has(source, id, kind) {
     return (kind === "read" ? this.read : this.later).has(source + ":" + id);
+  }
+  markRead(source, rows) {
+    for (const row of rows) this.read.set(source + ":" + row.id, true);
+    while (this.read.size > 1200) this.read.delete(this.read.keys().next().value);
+    this.save();
   }
   clearLocal() {
     this.feeds.local = [];

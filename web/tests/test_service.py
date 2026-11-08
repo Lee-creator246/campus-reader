@@ -85,6 +85,13 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual([n['id'] for n in body['notices']], ['A2','A1'])
         self.assertNotIn('hidden', body['notices'][1])
+        safe = 'https://my.bupt.edu.cn/media/notice.jpg'
+        self.assertEqual(feed('public', [dict(item, image=safe)])[1]['notices'][0]['image'], safe)
+        for unsafe in [safe+'?ticket=fixture', 'https://other.example/image.jpg',
+                       'https://user@my.bupt.edu.cn/a.jpg', safe+'\x01', safe+'\x85']:
+            status, result = feed('public', [dict(item, image=unsafe)])
+            self.assertEqual(status, 200)
+            self.assertNotIn('image', result['notices'][0])
 
     def test_feedback_receipt_is_private_and_requires_same_origin(self):
         sample = dict(message='Synthetic feedback', version='0.9.1', commit='abcdef0')

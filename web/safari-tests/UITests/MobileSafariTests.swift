@@ -45,11 +45,20 @@ final class MobileSafariTests: XCTestCase {
         XCTAssertTrue(loaded, safari.debugDescription)
         // Fresh Safari may show a native TipKit popover. It reports the background
         // web link as hittable but consumes the first tap to dismiss the tip.
-        // Tap the inert list heading before exercising the actual navigation link.
-        let heading = safari.webViews.staticTexts["通知"].firstMatch
+        // Tap the inert masthead before exercising the actual navigation link.
+        let heading = safari.webViews.staticTexts["北邮人信息"].firstMatch
         XCTAssertTrue(heading.waitForExistence(timeout: 8), safari.debugDescription)
         heading.tap()
         capture("simulated-iphone-safari-list")
+        XCTAssertTrue(row.label.contains("未读"), row.label)
+        row.press(forDuration: 1.0)
+        let closePreview = safari.webViews.buttons["关闭预览"].firstMatch
+        let previewOpened = closePreview.waitForExistence(timeout: 12)
+        capture(previewOpened ? "simulated-iphone-safari-preview" : "simulated-iphone-safari-preview-failure")
+        XCTAssertTrue(previewOpened, safari.debugDescription)
+        closePreview.tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 8), safari.debugDescription)
+        XCTAssertTrue(row.label.contains("未读"), row.label)
         row.tap()
 
         let back = safari.webViews.buttons.matching(NSPredicate(format: "label CONTAINS %@", "返回列表")).firstMatch
@@ -62,6 +71,7 @@ final class MobileSafariTests: XCTestCase {
         capture("simulated-iphone-safari-detail")
         back.tap()
         XCTAssertTrue(row.waitForExistence(timeout: 15), safari.debugDescription)
+        XCTAssertTrue(row.label.contains("已读"), row.label)
         capture("simulated-iphone-safari-return")
     }
 }

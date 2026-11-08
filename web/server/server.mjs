@@ -54,6 +54,16 @@ function feedNotice(item, seen) {
     const id = item.id.trim();
     seen.add(id);
     const result = { id, title: item.title.trim(), body: item.body, publishedAt: item.publishedAt };
+    // A thumbnail is optional. A malformed image must not hide a readable notice.
+    if (typeof item.image === 'string' && item.image.length <= 2048 && item.image.startsWith('https://') &&
+        !/[\s\\?#\u0000-\u001f\u007f-\u009f]/.test(item.image)) {
+        try {
+            const image = new URL(item.image);
+            if (image.origin === 'https://my.bupt.edu.cn' && !image.username && !image.password) {
+                result.image = image.href;
+            }
+        } catch { /* Keep the text-only row. */ }
+    }
     if (item.url) {
         let url;
         try { url = new URL(item.url); } catch { throw fail(503, 'invalid_public_feed'); }

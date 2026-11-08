@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#183c68">
+  <meta name="theme-color" content="#ffffff">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="referrer" content="no-referrer">
   <title>北邮人信息 · Safari 内测</title>
@@ -14,29 +14,90 @@
 </head>
 <body>
   <header class="masthead">
-    <div class="mast-inner">
-      <a class="brand" href="./"><img alt="" src="./icon.svg" width="36" height="36">北邮人信息</a>
-      <a class="feedback-shortcut" href="#feedback" id="feedback-link">测试反馈 <span aria-hidden="true">↗</span></a>
+    <div class="toolbar">
+      <button type="button" id="open-nav" class="icon-button" aria-label="打开导航" title="打开导航" aria-haspopup="dialog" aria-controls="navigation"><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#menu"></use></svg></button>
+      <button type="button" id="back-button" class="icon-button" aria-label="返回列表" title="返回列表" hidden><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#close"></use></svg></button>
+      <h1 id="bar-title">北邮人信息</h1>
+      <div id="list-tools" class="toolbar-actions">
+        <button type="button" id="open-options" class="icon-button" aria-label="阅读选项" title="阅读选项" aria-haspopup="dialog" aria-controls="reading-options"><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#eye"></use></svg></button>
+        <button type="button" id="open-search" class="icon-button" aria-label="搜索通知" title="搜索通知" aria-controls="search-panel" aria-expanded="false"><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#search"></use></svg></button>
+        <button type="button" id="mark-visible" class="icon-button" aria-label="标为已读" title="标为已读" ><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#check"></use></svg></button>
+      </div>
     </div>
   </header>
-  <div class="layout">
-    <aside class="tools" aria-label="阅读来源">
-      <label for="source">阅读来源</label>
-      <select id="source">
-        <option value="demo">演示数据</option>
-        <option value="local">本机导入</option>
-        <option value="campus" hidden disabled>公开通知</option>
-      </select>
-      <p id="source-description" class="meta"></p>
-      <div id="local-tools" hidden>
-        <label class="action file-action">选择 JSON 文件<input id="import-file" type="file" accept="application/json,.json"></label>
-        <details><summary>文件格式</summary><p>UTF-8 JSON，最多 200 条、512 KiB。文件只在本浏览器内处理。</p><pre>{"notices":[{"id":"1","title":"通知标题","publishedAt":"2026-11-01","body":"正文"}]}</pre></details>
-        <button type="button" id="clear-import" class="text-button" hidden>清除本机导入</button>
+  <main aria-label="通知阅读" class="reader">
+    <p id="storage-status" class="status" role="status" hidden></p>
+    <p id="source-status" class="status" role="status" hidden></p>
+    <section id="list-view" aria-label="通知列表">
+      <nav class="tabs" aria-label="阅读选项">
+        <button id="tab-recommended" data-tab="recommended">为你推荐</button>
+        <button id="tab-all" data-tab="all">最新</button>
+        <button id="tab-unread" data-tab="unread">未读</button>
+        <button id="tab-later" data-tab="later">稍后读</button>
+      </nav>
+      <nav id="topics" class="tabs topics" aria-label="主题标签"></nav>
+      <div id="search-panel" class="search-panel" hidden>
+        <svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#search"></use></svg><input id="search" type="search" maxlength="256" placeholder="搜索标题及缓存正文" aria-label="搜索标题及缓存正文">
+        <button type="button" id="close-search" class="icon-button" aria-label="清空并收起搜索" title="清空并收起搜索" ><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#close"></use></svg></button>
       </div>
-      <button type="button" id="refresh-campus" class="action" hidden>刷新公开通知</button>
-      <details id="push-settings" hidden>
-        <summary>手机提醒</summary>
-        <p>订阅公开通知更新或发送一条测试提醒。开启后，此站点会保存本机的推送订阅地址。</p>
+      <ul id="notices" aria-label="通知"></ul>
+      <p id="empty" class="empty" hidden></p>
+      <p id="count" class="count"></p>
+      <div class="source-line">
+        <button id="choose-source" aria-haspopup="dialog" aria-controls="navigation"><span id="feed-label">演示数据</span><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#down"></use></svg></button>
+        <span id="rec-note"></span>
+      </div>
+    </section>
+    <section id="detail-view" hidden>
+      <article>
+        <h2 id="detail-title" tabindex="-1"></h2>
+        <div class="article-meta"><time id="detail-date"></time><span aria-hidden="true">·</span><span id="detail-source"></span></div>
+        <div id="detail-body" class="body-text"></div>
+        <div id="detail-media"></div>
+        <a id="original" hidden target="_blank" rel="noopener noreferrer">在门户查看原文 ↗</a>
+      </article>
+      <div class="detail-tools" aria-label="正文阅读操作">
+        <button id="mark-unread"><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#check"></use></svg><span>未读</span></button>
+        <button id="detail-later"><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#bookmark"></use></svg><span>稍后读</span></button>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="navigation" class="drawer" aria-labelledby="drawer-title">
+    <div class="drawer-header">
+      <div class="drawer-brand"><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#book"></use></svg></div>
+      <div><h2 id="drawer-title">北邮人信息</h2><p>与你有关的校园信息</p></div>
+      <button type="button" id="close-nav" class="icon-button" aria-label="关闭导航" title="关闭导航" ><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#close"></use></svg></button>
+    </div>
+    <nav class="drawer-nav" aria-label="阅读导航">
+      <button data-jump="all"><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#book"></use></svg>全部校内通知<span id="drawer-unread"></span></button>
+      <button data-jump="later"><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#bookmark"></use></svg>稍后读<span id="drawer-later"></span></button>
+      <button data-jump="focus"><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#eye"></use></svg>重点关注<span id="drawer-focus"></span></button>
+    </nav>
+    <details id="keyword-rules"><summary><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#sliders"></use></svg>关键词规则</summary><div id="keyword-rules-editor" class="drawer-content"></div></details>
+    <h3>订阅</h3>
+    <label class="drawer-label" for="source"><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#feed"></use></svg>阅读来源</label>
+    <select id="source">
+      <option value="demo">演示数据</option>
+      <option value="local">本机导入</option>
+      <option value="campus" hidden disabled>公开通知</option>
+    </select>
+    <p id="source-description" class="hint"></p>
+    <div id="local-tools" hidden>
+      <label class="action file-action">选择 JSON 文件<input id="import-file" type="file" accept="application/json,.json"></label>
+      <p id="import-message" role="status" hidden></p>
+      <details><summary>文件格式</summary><p>UTF-8 JSON，最多 200 条、512 KiB。文件只在本浏览器内处理。</p>
+        <pre>{"notices":[{"id":"1","title":"通知标题","publishedAt":"2026-11-01","body":"正文"}]}</pre>
+      </details>
+      <button type="button" id="clear-import" class="text-button" hidden>清除本机导入</button>
+    </div>
+    <button type="button" id="refresh-campus" class="drawer-action" hidden><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#refresh"></use></svg>刷新公开通知</button>
+    <h3>阅读设置</h3>
+    <details id="preferences"><summary><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#sliders"></use></svg>关注偏好</summary>
+      <div class="drawer-content"><p>选择关注主题后，“为你推荐”会优先显示匹配的通知。</p><div id="interests"></div></div>
+    </details>
+    <details id="push-settings" hidden><summary><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#bell"></use></svg>手机提醒</summary>
+      <div class="drawer-content"><p>开启后，此站点会保存本机的推送订阅地址，用于公开通知和测试提醒。</p>
         <p id="push-status" role="status"></p>
         <div class="actions">
           <button type="button" id="push-enable" class="action" hidden>开启提醒</button>
@@ -44,57 +105,36 @@
           <button type="button" id="push-disable" class="action" hidden>取消订阅</button>
           <button type="button" id="push-retry" class="action" hidden>重新检查</button>
         </div>
-      </details>
-      <div class="portal-links">
-        <details><summary>学校信息门户</summary>
-          <p>在校园网或已授权的校园通道中访问。登录会话由学校网站管理。</p>
-          <a href="https://auth.bupt.edu.cn/authserver/login?service=http%3A%2F%2Fmy.bupt.edu.cn%3A80%2Fsystem%2Fresource%2Fcode%2Fauth%2Fclogin.jsp%3Fowner%3D1664271694" target="_blank" rel="noopener noreferrer">学校登录 ↗</a>
-          <a href="http://my.bupt.edu.cn/list.jsp?urltype=tree.TreeTempUrl&amp;wbtreeid=1154" target="_blank" rel="noopener noreferrer">门户通知列表 ↗</a>
-        </details>
       </div>
-    </aside>
-    <main aria-label="通知阅读">
-      <p id="storage-status" class="status" role="status" hidden></p>
-      <p id="source-status" class="status" role="status" hidden></p>
-      <section id="list-view">
-        <div class="section-heading"><h1>通知</h1><span id="count" class="meta"></span></div>
-        <nav class="tabs" aria-label="筛选通知">
-          <button id="tab-all" data-tab="all">全部</button>
-          <button id="tab-unread" data-tab="unread">未读</button>
-          <button id="tab-later" data-tab="later">稍后读</button>
-        </nav>
-        <ul id="notices" aria-label="通知列表"></ul>
-        <p id="empty" class="empty" hidden></p>
-      </section>
-      <section id="detail-view" hidden>
-        <button id="back-button" class="back" type="button">← 返回列表</button>
-        <article>
-          <div class="article-meta"><span id="detail-source"></span><time id="detail-date"></time></div>
-          <h1 id="detail-title" tabindex="-1"></h1>
-          <div class="actions">
-            <button id="detail-later" class="action"></button>
-            <button id="mark-unread" class="action"></button>
-          </div>
-          <div id="detail-body" class="body-text"></div>
-          <a id="original" hidden target="_blank" rel="noopener noreferrer">在门户查看原文 ↗</a>
-        </article>
-      </section>
-    </main>
-    <footer>
-      <details id="feedback">
-        <summary>测试反馈</summary>
-        <label for="feedback-message">你做了什么？实际看到了什么？</label>
-        <textarea id="feedback-message" maxlength="600" rows="4" placeholder="请勿填写账号、密码或粘贴真实校内通知。"></textarea>
-        <p id="feedback-policy" class="meta"></p>
-        <div class="actions">
-          <button id="send-feedback" class="action"></button>
-          <button id="copy-feedback" class="action">复制反馈</button>
-        </div>
+    </details>
+    <h3>校园访问</h3>
+    <details id="portal"><summary><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#link"></use></svg>学校信息门户</summary>
+      <div class="drawer-content"><p>在校园网或已授权的校园通道中打开学校网站。</p>
+        <a href="https://auth.bupt.edu.cn/authserver/login?service=http%3A%2F%2Fmy.bupt.edu.cn%3A80%2Fsystem%2Fresource%2Fcode%2Fauth%2Fclogin.jsp%3Fowner%3D1664271694" target="_blank" rel="noopener noreferrer">学校登录 ↗</a>
+        <a href="http://my.bupt.edu.cn/list.jsp?urltype=tree.TreeTempUrl&amp;wbtreeid=1154" target="_blank" rel="noopener noreferrer">门户通知列表 ↗</a>
+      </div>
+    </details>
+    <details id="feedback"><summary id="feedback-link"><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#feedback"></use></svg>体验反馈</summary>
+      <div class="drawer-content"><label for="feedback-message">你做了什么？实际看到了什么？</label>
+        <textarea id="feedback-message" maxlength="600" rows="3" placeholder="请勿填写账号、密码或真实校内通知。"></textarea>
+        <p id="feedback-policy"></p>
+        <div class="actions"><button id="send-feedback" class="action"></button><button id="copy-feedback" class="action">复制反馈</button></div>
         <p id="feedback-status" role="status"></p>
-      </details>
-      <div class="footer-line"><span id="build-version">Safari 内测</span><span>Safari 分享菜单 → 添加到主屏幕</span></div>
-    </footer>
-  </div>
+      </div>
+    </details>
+    <footer><span id="build-version">Safari 内测</span><span>Safari 分享菜单 → 添加到主屏幕</span></footer>
+  </dialog>
+  <dialog id="reading-options" class="options" aria-labelledby="options-title">
+    <div class="options-title"><h2 id="options-title">阅读选项</h2><button type="button" id="close-options" class="icon-button" aria-label="关闭阅读选项" title="关闭阅读选项" ><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#close"></use></svg></button></div>
+    <div class="read-filter"><button data-jump="all">全部通知</button><button data-jump="unread">仅未读</button><button data-jump="later">稍后读</button></div>
+    <div id="view-modes"><button data-mode="list">列表</button><button data-mode="magazine">杂志</button><button data-mode="card">卡片</button></div>
+    <button type="button" id="reset-filter" class="text-button">清除搜索与标签筛选</button>
+  </dialog>
+  <dialog id="preview" class="preview" aria-labelledby="preview-title">
+    <div class="options-title"><h2 id="preview-title"></h2><button id="close-preview" type="button" class="icon-button" aria-label="关闭预览"><svg aria-hidden="true" class="glyph"><use href="./glyphs.svg#close"></use></svg></button></div>
+    <p id="preview-meta"></p><p id="preview-copy"></p>
+    <div class="actions"><button id="preview-later" class="action"></button><button id="preview-read" class="action"></button><button id="preview-open" class="action">打开正文</button></div>
+  </dialog>
   <noscript>请开启浏览器 JavaScript 以查看和筛选通知。</noscript>
 </body>
 </html>
