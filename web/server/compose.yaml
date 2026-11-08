@@ -15,6 +15,7 @@ services:
       - feedback:/state
     environment:
       PUBLIC_ORIGIN: https://${CAMPUS_DOMAIN:?set your HTTPS domain}
+      PUBLIC_CLIENT_ORIGINS: ${PUBLIC_CLIENT_ORIGINS:-}
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped

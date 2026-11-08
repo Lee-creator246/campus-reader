@@ -2,9 +2,9 @@ name: iPhone Simulator Mobile Safari reading test
 on:
   push:
     branches: [main]
-    paths: ['web/**', '.github/workflows/safari-simulator.yml', 'ios/scripts/select_simulator.py']
+    paths: ['web/public/**', 'web/build.py', 'web/safari-tests/**', '.github/workflows/safari-simulator.yml', 'ios/scripts/select_simulator.py']
   pull_request:
-    paths: ['web/**', '.github/workflows/safari-simulator.yml', 'ios/scripts/select_simulator.py']
+    paths: ['web/public/**', 'web/build.py', 'web/safari-tests/**', '.github/workflows/safari-simulator.yml', 'ios/scripts/select_simulator.py']
   workflow_dispatch:
 permissions:
   contents: read
@@ -48,7 +48,7 @@ jobs:
           server=$!
           trap 'kill "$server" 2>/dev/null || true' EXIT
           curl --fail --silent --show-error --retry 8 --retry-connrefused http://127.0.0.1:18765/campus-reader/version.json
-          xcrun simctl openurl "$TEST_DEVICE" http://127.0.0.1:18765/campus-reader/
+          # The test launcher opens the URL inside the same simulator as XCUITest.
           xcodebuild -project web/safari-tests/SafariReaderSmoke.xcodeproj -scheme SafariReaderSmoke \
             -destination "platform=iOS Simulator,id=$TEST_DEVICE" -parallel-testing-enabled NO \
             -derivedDataPath "$RUNNER_TEMP/safari-derived" -resultBundlePath safari-evidence/Tests.xcresult \

@@ -10,6 +10,7 @@ import unittest
 from urllib import error, request
 
 HERE = Path(__file__).resolve().parents[1]
+EXTERNAL_ORIGIN = 'https://reader-test.example'
 sys.path.insert(0, str(HERE))
 import probe_portal
 
@@ -39,7 +40,8 @@ class ServiceTests(unittest.TestCase):
             port = s.getsockname()[1]
         self.url = 'http://127.0.0.1:' + str(port)
         env = dict(os.environ, PORT=str(port), BIND_HOST='127.0.0.1',
-                   PUBLIC_ORIGIN=self.url, STATE_DIR=str(self.root), PUBLIC_FEED=str(self.data))
+                   PUBLIC_ORIGIN=self.url, PUBLIC_CLIENT_ORIGINS=EXTERNAL_ORIGIN,
+                   STATE_DIR=str(self.root), PUBLIC_FEED=str(self.data))
         backend = subprocess.Popen(['node', str(HERE / 'server/server.mjs')], env=env,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.addCleanup(self.close_process, backend)
@@ -110,6 +112,43 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.fetch('/api/push/test',{**sub,'token':'e'*64},self.url)[0],403)
         self.assertEqual(self.fetch('/api/push/unsubscribe',sub,self.url)[0],200)
         self.assertEqual(self.fetch('/api/push/test',sub,self.url)[0],410)
+
+    def test_cross_origin_read_write_and_preflight_are_tightly_scoped(self):
+        def probe(path, method, origin, preflight_method=None, requested_headers='', payload=None):
+            headers={'Origin':origin}
+            if preflight_method:
+                headers.update({'Access-Control-Request-Method':preflight_method,
+                                'Access-Control-Request-Headers':requested_headers})
+            if payload is not None:
+                headers['Content-Type']='application/json'
+            q=request.Request(self.url+path, method=method, headers=headers,
+                              data=json.dumps(payload).encode() if payload is not None else None)
+            try: r=request.urlopen(q,timeout=3)
+            except error.HTTPError as err:r=err
+            with r:
+                self.assertNotIn('Access-Control-Allow-Credentials',r.headers)
+                return r.status,r.headers
+        status,h=probe('/api/feedback','OPTIONS',EXTERNAL_ORIGIN,'POST','content-type')
+        self.assertEqual(status,204)
+        self.assertEqual(h['Access-Control-Allow-Origin'],EXTERNAL_ORIGIN)
+        self.assertEqual(h['Access-Control-Allow-Methods'],'POST')
+        self.assertEqual(h['Access-Control-Allow-Headers'],'Content-Type')
+        self.assertIn('Origin',h['Vary'])
+        self.assertEqual(probe('/api/feedback','OPTIONS',EXTERNAL_ORIGIN,'POST','authorization')[0],403)
+        self.assertEqual(probe('/api/feedback','OPTIONS',EXTERNAL_ORIGIN,'DELETE','content-type')[0],403)
+        self.assertEqual(probe('/api/push/broadcast','OPTIONS',EXTERNAL_ORIGIN,'POST','content-type')[0],404)
+        wanted=dict(message='Synthetic cross-origin feedback',version='0.9.1',commit='abcdef0')
+        for bad in (EXTERNAL_ORIGIN+'.other.example','null'):
+            for name,method,data in [('/api/push/config','GET',None),('/api/feedback','POST',wanted)]:
+                status,h=probe(name,method,bad,payload=data)
+                self.assertEqual(status,403)
+                self.assertNotIn('Access-Control-Allow-Origin',h)
+        self.assertFalse((self.root/'feedback.ndjson').exists())
+        status,h=probe('/api/push/config','GET',EXTERNAL_ORIGIN)
+        self.assertEqual((status,h['Access-Control-Allow-Origin']),(200,EXTERNAL_ORIGIN))
+        status,h=probe('/api/feedback','POST',EXTERNAL_ORIGIN,payload=wanted)
+        self.assertEqual((status,h['Access-Control-Allow-Origin']),(201,EXTERNAL_ORIGIN))
+        self.assertEqual(json.loads((self.root/'feedback.ndjson').read_text())['message'],wanted['message'])
 
 
 if __name__ == '__main__':

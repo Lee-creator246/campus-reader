@@ -1,5 +1,6 @@
 import { Library, MAX_BYTES, SOURCE_NAMES, noticesFrom } from "./data.js";
 import { setupPush } from "./push.js";
+import { publicApiURL } from "./api-url.js";
 
 const $ = id => document.getElementById(id);
 const library = new Library();
@@ -18,6 +19,9 @@ function status(element, message) {
 }
 function serverMode() {
   return build.mode === "server" && build.api !== false;
+}
+function apiURL(operation) {
+  return publicApiURL(build, operation);
 }
 function route() {
   const parts = location.hash.slice(1).split("/");
@@ -142,7 +146,7 @@ async function request(url, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 22000);
   try {
-    const response = await fetch(url, {...options, signal: controller.signal, redirect: "error", cache: "no-store"});
+    const response = await fetch(url, {...options, credentials: "omit", signal: controller.signal, redirect: "error", cache: "no-store"});
     if (!response.ok) throw new Error("HTTP " + response.status);
     if (!response.headers.get("content-type")?.includes("application/json")) throw new Error("返回格式有误");
     const text = await response.text();
@@ -156,7 +160,7 @@ async function refreshCampus() {
   notices.campus = "正在刷新公开通知…";
   render();
   try {
-    const payload = await request("./api/notices");
+    const payload = await request(apiURL("notices"));
     library.feeds.campus = noticesFrom(payload);
     library.updated = new Date().toISOString();
     library.save();
@@ -203,7 +207,7 @@ async function submitFeedback() {
   }
   $("send-feedback").disabled = true;
   try {
-    await request("./api/feedback", {
+    await request(apiURL("feedback"), {
       method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(data),
     });
     $("feedback-message").value = "";
@@ -270,6 +274,6 @@ async function start() {
     "GitHub 反馈公开可见。你可以先预览再发布，或复制给维护者。";
   $("send-feedback").textContent = server ? "提交给维护者" : "前往 GitHub 预览";
   render();
-  if (server) setupPush();
+  if (server) setupPush(apiURL);
 }
 start();

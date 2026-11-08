@@ -54,7 +54,7 @@ const messages = {
   subscription_capacity: "当前内测订阅名额已满。",
   subscription_expired: "本机推送订阅已失效。请取消后重新订阅。",
 };
-async function api(name, record) {
+async function requestPush(url, record) {
   const controller = new AbortController();
   // Leave time to receive the gateway's response before treating a write as indeterminate.
   const timer = setTimeout(() => controller.abort(), 22000);
@@ -65,7 +65,7 @@ async function api(name, record) {
       options.headers = {"Content-Type": "application/json"};
       options.body = JSON.stringify({endpoint: record.endpoint, token: record.token});
     }
-    const response = await fetch("./api/push/" + name, options);
+    const response = await fetch(url, options);
     if (!response.headers.get("Content-Type")?.includes("application/json")) throw new Error("服务没有返回有效的确认信息。");
     const result = await response.json();
     if (!response.ok) {
@@ -93,7 +93,8 @@ function message(error) {
   return error.message || "提醒设置未完成，请重试。";
 }
 
-export function setupPush() {
+export function setupPush(apiURL) {
+  const api = (name, record) => requestPush(apiURL("push/" + name), record);
   $("push-settings").hidden = false;
   const say = text => { $("push-status").textContent = text; };
   const unavailable = capability();

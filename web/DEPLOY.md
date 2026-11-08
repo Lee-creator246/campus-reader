@@ -68,7 +68,9 @@ python web/build.py --output dist/safari
 
 每条通知有稳定且唯一的 `id`、标题、正文、时间，可选原文地址 `url` 仅接受门户主机。服务最多接受 200 条及 512 KiB 的文件。没有配置时，`GET /api/notices` 返回 503 与 `public_feed_not_configured`；配置或数据格式有误时返回 503 与 `invalid_public_feed`。不要把文件复制到 `site/` 下。
 
-服务仅接受和网页同源的小型 JSON 反馈，有请求大小、并发、每日、每月和总文件容量限制。换域名时同步修改 `CAMPUS_DOMAIN`。公开 GitHub Pages 上的反馈使用 GitHub 账户与 Issues，由用户自己决定是否公开提交。
+服务默认接收本站网页的小型 JSON 反馈，有请求大小、并发、每日、每月和总文件容量限制。换域名时同步修改 `CAMPUS_DOMAIN`。公开 GitHub Pages 上的反馈使用 GitHub 账户与 Issues，由用户自己决定是否公开提交。
+
+如果同一站点使用另一个受控 HTTPS 网页域名（例如 Cloudflare Worker），可显式设置 `PUBLIC_CLIENT_ORIGINS` 为该网页的 origin；例如 `https://reader.example.workers.dev`，不含路径或末尾斜杠。多个维护者所控制的域名可用逗号分隔。使用 Compose 时设置环境变量后重新运行 `docker compose up -d`；使用 systemd 时更新 API 服务环境并重启服务。这些网页可以由浏览器直接调用 VPS 六个公开接口；每个接口仅允许其指定方法，写入需要 JSON。CORS 仅反映白名单中实际收到的 origin，不使用通配或 Cookie 凭据。公开站点无需为访问者增加账号。移除某个前端时，请同时将其从白名单删除。
 
 ## 服务器版公开通知提醒
 
@@ -76,7 +78,7 @@ python web/build.py --output dist/safari
 
 服务器首次启动在私有状态目录生成 VAPID 密钥。Compose 使用持久卷 `/state`，systemd 使用 `/var/lib/campus-reader-safari-api`。严禁托管或提交 `push-state.json` 及临时副本；它们包含 VAPID 私钥、设备推送地址和管理凭证摘要。备份按私有凭据保存，更新或回退代码时继续使用同一目录。公钥可以从 `GET /api/push/config` 取得。私有状态损坏时推送 API 返回 503；先检查目录、权限及备份，避免静默换钥匙使所有设备失效。
 
-订阅/取消/测试需要同源 JSON 请求及该安装随机生成的管理 token，不提供匿名广播接口。测试提醒只有推送服务接受后返回 `accepted:true`；本人还需在设备上确认收到提醒，点开后回到当前站点。推送消息没有正文或个人数据，服务只对接固定的 Apple、Chrome 和 Firefox 推送主机，拒绝跳转到其他地址。网关 404 或 410 的订阅会自动清理。每个设备两次测试至少间隔一分钟，24 小时最多 4 次，Beta 服务最多 64 个订阅。
+订阅/取消/测试需要来自批准网页的 JSON 请求及该安装随机生成的管理 token，不提供匿名广播接口。测试提醒只有推送服务接受后返回 `accepted:true`；本人还需在设备上确认收到提醒，点开后回到当前站点。推送消息没有正文或个人数据，服务只对接固定的 Apple、Chrome 和 Firefox 推送主机，拒绝跳转到其他地址。网关 404 或 410 的订阅会自动清理。每个设备两次测试至少间隔一分钟，24 小时最多 4 次，Beta 服务最多 64 个订阅。
 
 投放一条新的公开通知时，按上一节审核并原子替换 `public-notices.json`。服务每分钟检查一次，按稳定 ID 去重，同批新增合并为一次通用提醒。首次启用时已有通知只建立基线。若需立即检查公开 feed，维护者可执行 `docker compose kill -s SIGUSR2 api`，systemd 部署则使用 `systemctl kill --kill-whom=main --signal=SIGUSR2 campus-reader-safari-api`。服务日志只显示各推送结果的数量。两次群发至少相隔两分钟。
 

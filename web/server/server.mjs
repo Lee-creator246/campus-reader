@@ -5,6 +5,16 @@ import path from 'node:path';
 import { PushRegistry } from './push.mjs';
 
 const origin = new URL(process.env.PUBLIC_ORIGIN).origin;
+const clientOrigins = new Set([origin]);
+for (const value of (process.env.PUBLIC_CLIENT_ORIGINS || '').split(',').map(v => v.trim()).filter(Boolean)) {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.origin !== value) throw new Error('PUBLIC_CLIENT_ORIGINS requires exact HTTPS origins');
+    clientOrigins.add(value);
+}
+const publicMethods = new Map([
+    ['/api/notices', 'GET'], ['/api/push/config', 'GET'], ['/api/feedback', 'POST'],
+    ['/api/push/subscribe', 'POST'], ['/api/push/unsubscribe', 'POST'], ['/api/push/test', 'POST'],
+]);
 const state = process.env.STATE_DIR || '/state';
 const feedFile = process.env.PUBLIC_FEED || '/data/public-notices.json';
 const port = Number(process.env.PORT || 8080);
@@ -83,7 +93,7 @@ async function readPublicFeed() {
 }
 
 async function parseJSON(req) {
-    if (req.headers.origin !== origin) throw fail(403, 'wrong_origin');
+    if (!clientOrigins.has(req.headers.origin)) throw fail(403, 'wrong_origin');
     if (req.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') {
         throw fail(415, 'json_required');
     }
@@ -161,6 +171,29 @@ const api = http.createServer({
     requestTimeout: 15_000, headersTimeout: 10_000, maxHeaderSize: 8192,
 }, async (req, res) => {
     try {
+        const allowedMethod = publicMethods.get(req.url);
+        if (!allowedMethod) throw fail(404, 'not_found');
+        const clientOrigin = req.headers.origin;
+        res.setHeader('Vary', 'Origin');
+        if (clientOrigin !== undefined) {
+            if (!clientOrigins.has(clientOrigin)) throw fail(403, 'wrong_origin');
+            res.setHeader('Access-Control-Allow-Origin', clientOrigin);
+        }
+        if (req.method === 'OPTIONS') {
+            if (!clientOrigin) throw fail(403, 'wrong_origin');
+            const requestedHeaders = (req.headers['access-control-request-headers'] || '').toLowerCase().split(',').map(h => h.trim()).filter(Boolean);
+            if (req.headers['access-control-request-method'] !== allowedMethod ||
+                requestedHeaders.some(h => h !== 'content-type')) throw fail(403, 'preflight_rejected');
+            res.writeHead(204, {
+                'Vary':'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
+                'Access-Control-Allow-Methods':allowedMethod,
+                'Access-Control-Allow-Headers':'Content-Type',
+                'Access-Control-Max-Age':'600',
+                'Cache-Control':'no-store',
+            });
+            return res.end();
+        }
+        if (req.method !== allowedMethod) throw fail(404, 'not_found');
         if (req.method === 'GET' && req.url === '/api/push/config') {
             if (!push) throw fail(503, 'push_unavailable');
             return send(res, 200, push.config);

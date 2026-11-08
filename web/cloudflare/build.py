@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -18,10 +19,11 @@ def checked_origin(value):
     if not value:
         return ""
     url = urlsplit(value)
-    if (url.scheme != "https" or not url.hostname or url.username is not None or url.password is not None
-            or url.port not in (None, 443) or url.path not in ("", "/") or url.query or url.fragment):
-        raise ValueError("--upstream requires a single HTTPS origin without credentials, path or query")
-    return "https://" + url.netloc
+    if (not re.fullmatch(r"https://(?:[a-zA-Z0-9.-]+|\[[a-fA-F0-9:]+\])/?", value)
+            or url.scheme != "https" or not url.hostname or url.username is not None or url.password is not None
+            or url.port is not None or url.path not in ("", "/") or url.query or url.fragment):
+        raise ValueError("--upstream requires one HTTPS origin without credentials, port, path or query")
+    return "https://" + url.netloc.lower()
 
 
 def package(source, output, upstream):
@@ -37,10 +39,14 @@ def package(source, output, upstream):
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     if version.get("mode") != "static" or version.get("commit") != head:
         raise ValueError("Static site must come from web/build.py at the current commit")
+    api_origin = checked_origin(upstream)
     version.update(mode="server", api=True)
+    version.pop("publicApiOrigin", None)
+    if api_origin:
+        version["publicApiOrigin"] = api_origin
     assets["site/version.json"] = (json.dumps(version, ensure_ascii=False) + "\n").encode()
     config = json.loads((HERE / "wrangler.json").read_text(encoding="utf8"))
-    config["vars"]["UPSTREAM_ORIGIN"] = checked_origin(upstream)
+    config["vars"]["UPSTREAM_ORIGIN"] = api_origin
     assets.update({
         "wrangler.json": (json.dumps(config, indent=2) + "\n").encode(),
         "worker.mjs": (HERE / "worker.mjs").read_bytes(),
@@ -82,7 +88,7 @@ def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--site", type=Path, help="Existing site output of web/build.py at this commit")
     cli.add_argument("--output", type=Path, default=ROOT / "dist/cloudflare")
-    cli.add_argument("--upstream", default="", help="Public API HTTPS origin, also editable in the generated wrangler.json")
+    cli.add_argument("--upstream", default="", help="Fixed HTTPS origin for browser API calls and the compatibility proxy")
     args = cli.parse_args()
     upstream = checked_origin(args.upstream)
     if args.site:
